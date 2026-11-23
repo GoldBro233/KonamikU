@@ -1,14 +1,17 @@
 package org.cf0x.konamiku.system
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -191,6 +194,10 @@ object UpdateTask {
     }
 
     private fun postOutcome(context: Context, title: String, text: String, tap: PendingIntent) {
+        // Without the permission (33+) or with notifications off (below) the
+        // post would be dropped anyway; the in-app dialog still shows the state.
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) return
         ensureChannels(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERT)
             .setSmallIcon(R.mipmap.ic_launcher_round)

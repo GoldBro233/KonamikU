@@ -1,9 +1,11 @@
 package org.cf0x.konamiku.system
 
+import android.Manifest
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Handler
 import android.os.IBinder
@@ -12,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -320,9 +323,14 @@ class UpdateDownloadService : Service() {
     ) {
         synchronized(lock) {
             if (task.isCancelled || current !== task) return
-            runCatching {
-                NotificationManagerCompat.from(this)
-                    .notify(UpdateTask.NOTIF_ID_PROGRESS, buildNotification(task, text, percent))
+            // Progress updates are dropped without the permission (33+) or with
+            // notifications off (below); the task state below still updates.
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+                runCatching {
+                    NotificationManagerCompat.from(this)
+                        .notify(UpdateTask.NOTIF_ID_PROGRESS, buildNotification(task, text, percent))
+                }
             }
             UpdateTask.updateIfOwner(task.id, transform)
         }

@@ -152,6 +152,12 @@ fun MainScreen(dataStore: AppDataStore, statusViewModel: StatusViewModel) {
         EmulationController.Failure.SUPERSEDED      -> null
     }
 
+    // Resolved during composition so the text follows a language change;
+    // strings read from LocalContext later are not observed by Compose.
+    val failureText = EmulationController.Failure.entries.associateWith { reason ->
+        failureMessage(reason)?.let { stringResource(it) }
+    }
+
     fun activateCard(card: NfcCard) {
         scope.launch {
             val mode = effectiveMode(card)
@@ -162,7 +168,7 @@ fun MainScreen(dataStore: AppDataStore, statusViewModel: StatusViewModel) {
             }
             val outcome = EmulationController.activate(context, card, mode, activeNotification)
             if (outcome is EmulationController.Outcome.Failed) {
-                failureMessage(outcome.reason)?.let { snackbarState.showSnackbar(context.getString(it)) }
+                failureText[outcome.reason]?.let { snackbarState.showSnackbar(it) }
             }
         }
     }
