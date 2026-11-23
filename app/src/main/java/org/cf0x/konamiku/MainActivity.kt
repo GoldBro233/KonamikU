@@ -6,9 +6,9 @@ import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
@@ -19,7 +19,6 @@ import com.materialkolor.PaletteStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.cf0x.konamiku.data.AppDataStore
-import org.cf0x.konamiku.data.AppLocale
 import org.cf0x.konamiku.data.ColorSource
 import org.cf0x.konamiku.data.ThemeMode
 import org.cf0x.konamiku.nfc.EmulationController
@@ -27,8 +26,13 @@ import org.cf0x.konamiku.system.UpdateInstaller
 import org.cf0x.konamiku.system.UpdateTask
 import org.cf0x.konamiku.ui.layout.MainLayout
 import org.cf0x.konamiku.ui.theme.KonamikuTheme
+import org.cf0x.konamiku.util.mirrorSystemLocale
 
-class MainActivity : ComponentActivity() {
+/**
+ * AppCompatActivity rather than ComponentActivity: below API 33 the in-app
+ * language is applied through AppCompat's delegate, which only exists here.
+ */
+class MainActivity : AppCompatActivity() {
 
     private lateinit var dataStore: AppDataStore
 
@@ -117,16 +121,7 @@ class MainActivity : ComponentActivity() {
         // API 33+: the system's per-app language is the truth, and it may
         // have been changed or cleared in system Settings while we were away.
         if (Build.VERSION.SDK_INT >= 33) {
-            runCatching {
-                val lm = getSystemService(android.app.LocaleManager::class.java) ?: return@runCatching
-                val sysTags = lm.applicationLocales.toLanguageTags()
-                if (sysTags.isNotBlank()) {
-                    val matched = AppLocale.fromSystemTag(sysTags)
-                    // DataStore writes hit the disk; keep them off the main
-                    // thread. Nothing here needs the result synchronously.
-                    if (matched != null) lifecycleScope.launch { dataStore.saveAppLocale(matched) }
-                }
-            }
+            lifecycleScope.launch { applicationContext.mirrorSystemLocale(dataStore) }
         }
     }
 

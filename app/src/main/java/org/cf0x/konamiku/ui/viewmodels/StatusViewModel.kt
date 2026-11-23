@@ -234,5 +234,5 @@ class StatusViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun str(@StringRes resId: Int, vararg formatArgs: Any): String =
-        getApplication<Application>().getString(resId, *formatArgs)
+        context.localized().getString(resId, *formatArgs)
 }

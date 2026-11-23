@@ -18,6 +18,7 @@ import org.cf0x.konamiku.data.AppDataStore
 import org.cf0x.konamiku.data.UpdateInterval
 import org.cf0x.konamiku.data.UpdateMode
 import org.cf0x.konamiku.data.UpdateState
+import org.cf0x.konamiku.util.localized
 import java.util.concurrent.TimeUnit
 
 /**
@@ -222,7 +223,9 @@ object UpdateManager {
 
     // ── Notification helper (used by both auto and test flows) ────────────
 
-    fun showUpdateNotification(context: Context, version: String) {
+    fun showUpdateNotification(base: Context, version: String) {
+        // Workers and receivers are outside AppCompat's per-app language.
+        val context = base.localized()
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }

@@ -15,6 +15,8 @@ import org.cf0x.konamiku.data.AppDataStore
 import org.cf0x.konamiku.data.AppLocale
 import org.cf0x.konamiku.system.UpdateManager
 import org.cf0x.konamiku.util.applyLocale
+import org.cf0x.konamiku.util.mirrorSystemLocale
+import org.cf0x.konamiku.util.systemAppLocale
 import org.cf0x.konamiku.xposed.KonamikuModule
 import org.cf0x.konamiku.xposed.NfcHookReceiver
 import org.cf0x.konamiku.xposed.XposedActivationState
@@ -53,30 +55,43 @@ class KonamikuApp : Application(), XposedServiceHelper.OnServiceListener {
             UpdateManager.schedule(this@KonamikuApp, interval)
         }
 
-        // Sync with system per-app language (API 33+). If the user changed it via
-        // system Settings → Apps → Language, our DataStore should follow.
-        val systemTag = if (Build.VERSION.SDK_INT >= 33) {
-            runCatching {
-                val lm = getSystemService(android.app.LocaleManager::class.java) ?: return@runCatching ""
-                lm.applicationLocales.toLanguageTags() ?: ""
-            }.getOrDefault("")
-        } else ""
-
-        val effectiveTag = if (systemTag.isNotBlank()) {
-            val matched = AppLocale.fromSystemTag(systemTag)
-            if (matched != null) appScope.launch { dataStore.saveAppLocale(matched) }
-            systemTag
-        } else {
-            // The stored locale decides which resources load for the first
-            // screen, so this one read has to complete before applyLocale().
-            runCatching {
-                runBlocking { dataStore.appLocale.first().tag }
-            }.getOrDefault(AppLocale.EN_US.tag)
-        }
-
-        applyLocale(effectiveTag)
+        syncLocale(dataStore)
 
         XposedServiceHelper.registerListener(this)
+    }
+
+    /**
+     * Puts the language choice in effect for this process; see LocaleHelper
+     * for which store is authoritative on which API level.
+     */
+    private fun syncLocale(dataStore: AppDataStore) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            // The system already applies its per-app language to every
+            // context, so nothing here blocks startup.
+            appScope.launch {
+                runCatching {
+                    val stored = dataStore.appLocaleSnapshot()
+                    if (!stored.migrated) {
+                        // Older builds kept the choice only in DataStore. Hand
+                        // it to the system once; after that an empty system
+                        // list means "follow the system", not "restore ours".
+                        if (systemAppLocale() == AppLocale.SYSTEM && stored.locale != AppLocale.SYSTEM) {
+                            applyLocale(stored.locale.tag)
+                        }
+                        dataStore.markLocaleMigrated()
+                    } else {
+                        mirrorSystemLocale(dataStore)
+                    }
+                }.onFailure { Log.w(TAG, "Locale sync failed: ${it.message}") }
+            }
+        } else {
+            // AppCompat holds the choice only in memory below 33, and it has
+            // to be in place before the first Activity, so this read blocks.
+            val stored = runCatching {
+                runBlocking { dataStore.appLocaleSnapshot().locale }
+            }.getOrDefault(AppLocale.SYSTEM)
+            applyLocale(stored.tag)
+        }
     }
 
     override fun onServiceBind(service: XposedService) {

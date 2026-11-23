@@ -9,21 +9,28 @@ import androidx.core.os.LocaleListCompat
 import org.cf0x.konamiku.data.AppDataStore
 import org.cf0x.konamiku.data.AppLocale
 
-/**
- * Apply App locale settings.
- * - API 33+: Use LocaleManager (no Activity reconstruction)
- * - Below: Fallback to AppCompatDelegate (may reconstruct Activity)
+/*
+ * Where the language choice lives:
+ *  - API 33+: the system's per-app language (LocaleManager) is the truth. An
+ *    empty list means "follow the system", including after the user cleared
+ *    it in system Settings. DataStore only mirrors it for the settings UI,
+ *    apart from a one-time migration of the choice older builds stored there.
+ *  - API 29-32: DataStore is the truth and AppCompat applies it to
+ *    AppCompatActivity. Other contexts (services, receivers, notifications)
+ *    are not covered by AppCompat and resolve strings through [localized].
  */
+
+/** Applies a language choice. A blank tag ([AppLocale.SYSTEM]) clears the override. */
 fun Context.applyLocale(tag: String) {
-    if (tag.isBlank()) return
     if (Build.VERSION.SDK_INT >= 33) {
         runCatching {
             val lm = getSystemService(android.app.LocaleManager::class.java) ?: return@runCatching
-            lm.applicationLocales = android.os.LocaleList.forLanguageTags(tag)
+            lm.applicationLocales =
+                if (tag.isBlank()) LocaleList.getEmptyLocaleList() else LocaleList.forLanguageTags(tag)
         }
     } else {
         AppCompatDelegate.setApplicationLocales(
-            LocaleListCompat.forLanguageTags(tag)
+            if (tag.isBlank()) LocaleListCompat.getEmptyLocaleList() else LocaleListCompat.forLanguageTags(tag)
         )
     }
 }

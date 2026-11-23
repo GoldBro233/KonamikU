@@ -550,9 +550,9 @@ private fun LanguageItem(dataStore: AppDataStore, appLocale: AppLocale) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var pending  by remember(appLocale) { mutableStateOf(appLocale) }
-    val options  = AppLocale.entries.filter { it != AppLocale.SYSTEM }.map { 
-        stringResource(it.labelRes) to it 
-    }
+    // SYSTEM is a real choice: it clears the override instead of pinning
+    // whichever language the device happens to use now.
+    val options  = AppLocale.entries.map { stringResource(it.labelRes) to it }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
@@ -575,7 +575,7 @@ private fun LanguageItem(dataStore: AppDataStore, appLocale: AppLocale) {
                 )
                 if (!expanded) {
                     Text(
-                        options.firstOrNull { it.second == appLocale }?.first ?: stringResource(R.string.setting_language_en),
+                        options.firstOrNull { it.second == appLocale }?.first ?: stringResource(R.string.setting_language_system),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline
                     )
@@ -614,6 +614,10 @@ private fun LanguageItem(dataStore: AppDataStore, appLocale: AppLocale) {
                         scope.launch {
                             dataStore.saveAppLocale(pending)
                             context.applyLocale(pending.tag)
+                            // Below 33 AppCompat may update this Activity in
+                            // place, which Compose does not observe; rebuild
+                            // it so the visible text follows the choice.
+                            if (Build.VERSION.SDK_INT < 33) (context as? Activity)?.recreate()
                         }
                     }) { Text(stringResource(R.string.card_add_confirm)) }
                 }
