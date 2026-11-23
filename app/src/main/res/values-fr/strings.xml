@@ -98,7 +98,6 @@
     <string name="setting_dev_force_emu_desc">Déverrouille tous les modes d\'émulation sur les appareils prenant en charge HCE-F nativement.</string>
 
     <string name="toast_idm_scanned">IDm : %1$s</string>
-    <string name="toast_nfc_loaded">NFC chargé</string>
     <string name="oobe_status_loading">…</string>
     <string name="tools_id_converter_title">Convertisseur d\'ID</string>
     <string name="tools_label_idm">IDm (16 hex)</string>

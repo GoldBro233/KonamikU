@@ -98,7 +98,6 @@
     <string name="setting_dev_force_emu_desc">ネイティブ HCE-F 対応端末で全エミュレーションモードを有効化します。</string>
 
     <string name="toast_idm_scanned">IDm: %1$s</string>
-    <string name="toast_nfc_loaded">NFC ロード済み</string>
     <string name="oobe_status_loading">…</string>
     <string name="tools_id_converter_title">ID変換</string>
     <string name="tools_label_idm">IDm（16桁16進数）</string>

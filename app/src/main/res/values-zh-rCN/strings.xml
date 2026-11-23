@@ -108,7 +108,6 @@
     <string name="setting_dev_force_emu_desc">在原生支持 HCE-F 的设备上解锁全部模拟模式。</string>
 
     <string name="toast_idm_scanned">IDm: %1$s</string>
-    <string name="toast_nfc_loaded">NFC 已加载</string>
     <string name="oobe_status_loading">…</string>
     <string name="tools_id_converter_title">ID 转换器</string>
     <string name="tools_label_idm">IDm (16位十六进制)</string>

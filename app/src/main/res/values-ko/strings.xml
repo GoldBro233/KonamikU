@@ -98,7 +98,6 @@
     <string name="setting_dev_force_emu_desc">네이티브 HCE-F 지원 기기에서 모든 에뮬레이션 모드를 잠금 해제합니다.</string>
 
     <string name="toast_idm_scanned">IDm: %1$s</string>
-    <string name="toast_nfc_loaded">NFC 로드됨</string>
     <string name="oobe_status_loading">…</string>
     <string name="tools_id_converter_title">ID 변환기</string>
     <string name="tools_label_idm">IDm (16자리 16진수)</string>

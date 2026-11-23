@@ -135,7 +135,6 @@
     <string name="tools_err_generic">Conversion failed</string>
     <string name="tile_label" translatable="false">KonamikU</string>
     <string name="toast_idm_scanned">IDm: %1$s</string>
-    <string name="toast_nfc_loaded">NFC Loaded</string>
     <string name="oobe_status_loading">…</string>
     <string name="greeting">Hello</string>
 
