@@ -8,7 +8,7 @@ set(BUILD_TEST            OFF CACHE BOOL "" FORCE)
 add_subdirectory(Dobby)
 
 # ── libpmm.so ────────────────────────────────────────────────────────────
-add_library(pmm SHARED bridge.c)
+add_library(pmm SHARED bridge.c pmm_tlv.c)
 
 target_include_directories(pmm PRIVATE
         Dobby/include
