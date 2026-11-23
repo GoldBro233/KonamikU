@@ -6,30 +6,44 @@ import android.content.UriMatcher
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Binder
+import android.os.Process
+import android.os.UserManager
+import android.util.Log
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import org.cf0x.konamiku.data.AppDataStore
 
 /**
- * Cross-process ContentProvider that exposes the PMm Tool enabled state.
+ * Cross-process ContentProvider that exposes the persisted PMm Tool setting.
  *
- * The Xposed module (running in `com.android.nfc` process) queries this
- * provider to decide whether to inject [libpmm.so] into the NFC process.
+ * The Xposed module (running in `com.android.nfc`) queries it to decide
+ * whether to inject libpmm.so. The answer is read from [AppDataStore] on every
+ * query, so it is right even when this process was just started for the
+ * query and the UI never ran.
  *
  * URI: `content://org.cf0x.konamiku.pmmconfig/pmm_enabled`
- * Returns a single row with column "enabled" (int: 1 or 0).
+ *  - one row, column "enabled" (1 or 0): the stored value, or the product
+ *    default (enabled) when the user never changed it;
+ *  - no cursor: the setting cannot be read right now (user not unlocked yet,
+ *    storage error, query from another user). The module treats that as
+ *    "not yet known" and asks again later instead of guessing.
  */
 class PmmConfigProvider : ContentProvider() {
 
     companion object {
+        private const val TAG = "KonamikU-PmmConfig"
         private const val AUTHORITY = "org.cf0x.konamiku.pmmconfig"
         private const val PATH_PMM_ENABLED = "pmm_enabled"
         private const val CODE_PMM_ENABLED = 1
 
+        /** Bounds the binder thread the module is blocked on. */
+        private const val READ_TIMEOUT_MS = 2_000L
+
         private val URI_MATCHER = UriMatcher(UriMatcher.NO_MATCH).apply {
             addURI(AUTHORITY, PATH_PMM_ENABLED, CODE_PMM_ENABLED)
         }
-
-        /** Current PMm enabled state, updated by the main app. */
-        @Volatile
-        var pmmEnabled: Boolean = true
 
         val CONTENT_URI: Uri = Uri.parse("content://$AUTHORITY/$PATH_PMM_ENABLED")
     }
@@ -43,48 +57,46 @@ class PmmConfigProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        return when (URI_MATCHER.match(uri)) {
-            CODE_PMM_ENABLED -> {
-                val cursor = MatrixCursor(arrayOf("enabled"))
-                cursor.addRow(arrayOf(if (pmmEnabled) 1 else 0))
-                cursor
-            }
-            else -> null
+        if (URI_MATCHER.match(uri) != CODE_PMM_ENABLED) return null
+        val enabled = readPmmEnabled() ?: return null
+        return MatrixCursor(arrayOf("enabled")).apply { addRow(arrayOf(if (enabled) 1 else 0)) }
+    }
+
+    private fun readPmmEnabled(): Boolean? {
+        val ctx = context ?: return null
+        // Each user has its own copy of this setting; never answer one user's
+        // NFC stack with another user's switch.
+        if (Binder.getCallingUserHandle() != Process.myUserHandle()) {
+            Log.w(TAG, "Query from another user (${Binder.getCallingUserHandle()}); not answering")
+            return null
+        }
+        // DataStore lives in credential-encrypted storage, unreadable before
+        // the first unlock after boot.
+        if (ctx.getSystemService(UserManager::class.java)?.isUserUnlocked != true) {
+            Log.i(TAG, "User locked; setting unavailable")
+            return null
+        }
+        // The caller is blocked on this binder call, so the read is bounded.
+        // clearCallingIdentity: DataStore reads our own files, not the caller's.
+        val token = Binder.clearCallingIdentity()
+        return try {
+            runCatching {
+                runBlocking {
+                    withTimeoutOrNull(READ_TIMEOUT_MS) { AppDataStore(ctx).pmmEnabled.first() }
+                }
+            }.onFailure { Log.w(TAG, "Cannot read setting: ${it.message}") }.getOrNull()
+        } finally {
+            Binder.restoreCallingIdentity(token)
         }
     }
 
+    /** The setting is written through DataStore; the provider never accepts writes. */
     override fun update(
         uri: Uri,
         values: ContentValues?,
         selection: String?,
         selectionArgs: Array<out String>?
-    ): Int {
-        // The provider is exported so the module in com.android.nfc can read
-        // it, which also exposes writes to every other app on the device.
-        // Reads are harmless (the value is a user preference), writes are not:
-        // refuse anything that is not this app writing to itself.
-        if (!callerIsSelf()) {
-            return 0
-        }
-        return when (URI_MATCHER.match(uri)) {
-            CODE_PMM_ENABLED -> {
-                values?.getAsInteger("enabled")?.let {
-                    pmmEnabled = it == 1
-                }
-                1 // number of rows affected
-            }
-            else -> 0
-        }
-    }
-
-    /**
-     * Binder calls made by our own process (and by the system on our behalf)
-     * report our uid or the system uid; anything else is a third party.
-     */
-    private fun callerIsSelf(): Boolean = runCatching {
-        val uid = android.os.Binder.getCallingUid()
-        uid == android.os.Process.myUid() || uid == android.os.Process.SYSTEM_UID
-    }.getOrDefault(false)
+    ): Int = 0
 
     override fun getType(uri: Uri): String? =
         if (URI_MATCHER.match(uri) == CODE_PMM_ENABLED)

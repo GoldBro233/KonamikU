@@ -179,13 +179,7 @@ class AppDataStore(private val context: Context) {
 
     val pmmEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.PMM_ENABLED] ?: true }
 
-    suspend fun savePmmEnabled(v: Boolean) {
-        context.dataStore.edit { it[Keys.PMM_ENABLED] = v }
-        // Outside edit{}: that lambda runs inside DataStore's IO actor and can
-        // be retried, so a side effect placed there would fire more than once
-        // and could run while the write itself still failed.
-        org.cf0x.konamiku.system.PmmConfigProvider.pmmEnabled = v
-    }
+    suspend fun savePmmEnabled(v: Boolean) = context.dataStore.edit { it[Keys.PMM_ENABLED] = v }
 
     suspend fun saveDevModeForceEmu(v: Boolean) =
         context.dataStore.edit { it[Keys.DEV_FORCE_EMU] = v }
