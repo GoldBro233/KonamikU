@@ -6,6 +6,8 @@ import android.nfc.NfcAdapter
 import android.nfc.cardemulation.NfcFCardEmulation
 import android.util.Log
 import org.cf0x.konamiku.nfc.EmuCard
+import org.cf0x.konamiku.nfc.EmulationController
+import org.cf0x.konamiku.nfc.SYSTEM_CODE_FELICA
 
 object NfcHookProber {
     private const val TAG = "KonamikU-Prober"
@@ -13,6 +15,9 @@ object NfcHookProber {
     /**
      * Probes if the NFC hook (isValidSystemCode) is active by attempting to register
      * a system code that would normally be rejected (or just calling the method).
+     *
+     * The probe goes through [EmuCard]'s own registration, so an HCE session
+     * that is running gets its system code back afterwards.
      */
     fun probe(context: Context): Boolean {
         val adapter = NfcAdapter.getDefaultAdapter(context) ?: return false
@@ -25,7 +30,7 @@ object NfcHookProber {
         // false positive on non-hooked devices. "FFFF" is guaranteed to be rejected
         // by isValidSystemCode on stock ROMs, so it only succeeds when our hook
         // makes isValidSystemCode always return true.
-        return runCatching {
+        val hooked = runCatching {
             val ok = emulation.registerSystemCodeForService(component, "FFFF")
             if (ok) {
                 runCatching {
@@ -36,5 +41,11 @@ object NfcHookProber {
             }
             ok
         }.getOrDefault(false)
+
+        if (EmulationController.session.value?.hce == true) {
+            runCatching { emulation.registerSystemCodeForService(component, SYSTEM_CODE_FELICA) }
+                .onFailure { Log.w(TAG, "Cannot restore the active session's system code: ${it.message}") }
+        }
+        return hooked
     }
 }

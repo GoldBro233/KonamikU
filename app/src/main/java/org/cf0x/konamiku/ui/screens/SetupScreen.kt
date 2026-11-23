@@ -26,6 +26,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
@@ -418,12 +419,15 @@ private fun StatusPage(effectiveLocale: AppLocale?) {
             StatusDetector.detectRoot()
         } ?: StatusDetector.RootStatus(available = false)
 
-        // Xposed detection (5 retries, 1.5s interval)
+        // Xposed detection: up to 5 attempts, 1.5s apart. The first success
+        // ends it; every probe touches the service's registration, so no
+        // extra probe runs after it, and a later miss cannot undo it.
         var hooked = false
-        repeat(5) {
-            hooked = NfcHookProber.probe(context)
-            if (hooked) return@repeat
-            delay(1500)
+        var attempts = 0
+        while (!hooked && attempts < 5) {
+            if (attempts > 0) delay(1500)
+            hooked = withContext(Dispatchers.IO) { NfcHookProber.probe(context) }
+            attempts++
         }
         xposedActive = hooked
         xposedProvider = if (hooked) {
