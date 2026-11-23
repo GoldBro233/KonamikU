@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.cf0x.konamiku.R
 import org.cf0x.konamiku.data.AppDataStore
 import org.cf0x.konamiku.nfc.EmulationController
@@ -27,6 +28,7 @@ import org.cf0x.konamiku.util.localized
 import org.cf0x.konamiku.util.restartApp
 import org.cf0x.konamiku.xposed.XposedActivationState
 import org.cf0x.konamiku.xposed.XposedState
+import java.util.concurrent.atomic.AtomicLong
 
 /** Describes a pending user action awaiting confirmation via dialog. */
 sealed class PendingAction {
@@ -62,6 +64,13 @@ class StatusViewModel(application: Application) : AndroidViewModel(application) 
     private val _showRestartDialog = MutableStateFlow(false)
     val showRestartDialog: StateFlow<Boolean> = _showRestartDialog.asStateFlow()
 
+    /**
+     * Bumped by every write to the NFC part of [_status]. A background probe
+     * publishes only if no newer write happened while it ran, so a slow
+     * result can never overwrite a fresher one.
+     */
+    private val nfcVersion = AtomicLong()
+
     init {
         refresh()
         observeXposedState()
@@ -74,20 +83,31 @@ class StatusViewModel(application: Application) : AndroidViewModel(application) 
         if (_isRefreshing.value) return
         viewModelScope.launch {
             _isRefreshing.value = true
-            _status.value       = StatusDetector.detectAll(context)
+            val version = nfcVersion.incrementAndGet()
+            val detected = StatusDetector.detectAll(context)
+            _status.update { current ->
+                // detectAll carries its own XposedStatus snapshot; the
+                // observed flows are newer, so keep theirs when present.
+                val nfc = if (nfcVersion.get() == version) detected.nfc else current?.nfc ?: detected.nfc
+                detected.copy(nfc = nfc, xposed = current?.xposed ?: detected.xposed)
+            }
             _isRefreshing.value = false
         }
     }
 
     fun refreshNfc() {
         viewModelScope.launch {
-            _status.update { it?.copy(nfc = StatusDetector.detectNfc(context)) }
+            val version = nfcVersion.incrementAndGet()
+            // NfcAdapter lookups are binder calls; never on the main thread.
+            val nfc = withContext(Dispatchers.IO) { StatusDetector.detectNfc(context) }
+            if (nfcVersion.get() == version) _status.update { it?.copy(nfc = nfc) }
         }
     }
 
     fun refreshXposed() {
         viewModelScope.launch {
-            _status.update { it?.copy(xposed = StatusDetector.detectXposed()) }
+            val xposed = withContext(Dispatchers.IO) { StatusDetector.detectXposed() }
+            _status.update { it?.copy(xposed = xposed) }
         }
     }
 
@@ -222,12 +242,17 @@ class StatusViewModel(application: Application) : AndroidViewModel(application) 
                     pmmState     = pmmState
                 )
             }.collect { xposedStatus ->
-                _status.update { current ->
-                    current?.copy(xposed = xposedStatus)
-                        ?: StatusDetector.AllStatus(
-                            nfc    = StatusDetector.detectNfc(context),
-                            xposed = xposedStatus
-                        )
+                if (_status.value != null) {
+                    _status.update { it?.copy(xposed = xposedStatus) }
+                } else {
+                    // First emission, before refresh() finished: a provisional
+                    // snapshot, probed off the main thread. If refresh() won
+                    // the race, only the Xposed part is applied to its result.
+                    val nfc = withContext(Dispatchers.IO) { StatusDetector.detectNfc(context) }
+                    _status.update { latest ->
+                        latest?.copy(xposed = xposedStatus)
+                            ?: StatusDetector.AllStatus(nfc = nfc, xposed = xposedStatus)
+                    }
                 }
             }
         }
