@@ -21,35 +21,49 @@ class KonamikuModule : XposedModule() {
         }
     }
 
-    /** Current hook state; published to the app via the hooked broadcast. */
+    /** Current hook state; published to the app via the hooked broadcast. Guarded by [pmmLock]. */
     @Volatile
     var pmmState: PmmState = PmmState.NOT_ATTEMPTED
         private set
 
-    /** True once libpmm.so was loaded and the hook was attempted at least once. */
-    @Volatile
-    private var pmmInjected = false
+    /**
+     * Whether libpmm.so is loaded in this process. Kept apart from [pmmState]:
+     * a loaded library can still be waiting for the NCI stack, and a failed
+     * load must be retried rather than recorded as an attempt.
+     */
+    private var libraryLoaded = false
+
+    /** Set once the user's setting has been read and said "off". */
+    private var disabledByUser = false
+
+    /** One state transition in flight per NFC process. */
+    private val pmmLock = Any()
+
+    /** Order of the reports this process sends; the app drops older ones. */
+    private var reportSeq = 0L
+
+    /** Identifies this NFC process instance across restarts that reuse a pid. */
+    private val processInstance: String by lazy {
+        "${android.os.Process.myPid()}:${android.os.Process.getStartUptimeMillis()}"
+    }
 
     /**
-     * Queries the main app's [PmmConfigProvider] for the PMm Tool enabled state.
-     * Called on each card activation (via isValidSystemCode hook).
-     * Defaults to `true` if the provider is not yet available.
+     * Reads the PMm Tool setting from the app's [org.cf0x.konamiku.system.PmmConfigProvider].
+     *
+     * @return the setting, or null when it cannot be read right now (app
+     *         storage locked before the first unlock, provider missing,
+     *         query failed). Null is not an answer: the caller asks again on
+     *         the next activation instead of turning the hook on or off.
      */
-    private fun isPmmEnabled(): Boolean = runCatching {
-        val ctx = Class.forName("android.app.ActivityThread")
-            .getDeclaredMethod("currentApplication").invoke(null) as? Context
-            ?: return@runCatching true
-        val cursor = ctx.contentResolver.query(
+    private fun readPmmEnabled(): Boolean? = runCatching {
+        val ctx = nfcContext() ?: return@runCatching null
+        ctx.contentResolver.query(
             Uri.parse("content://org.cf0x.konamiku.pmmconfig/pmm_enabled"),
             null, null, null, null
-        )
-        cursor?.use {
-            if (it.moveToFirst()) {
-                return@runCatching it.getInt(0) == 1
-            }
-        }
-        true
-    }.getOrDefault(true)
+        )?.use { if (it.moveToFirst()) it.getInt(0) == 1 else null }
+    }.onFailure {
+        Log.w("KonamikU", "PMm setting unavailable: ${it.javaClass.simpleName}: ${it.message}")
+    }.getOrNull()
 
     /** @return the Context of the current process (com.android.nfc) */
     private fun nfcContext(): Context? = runCatching {
@@ -71,12 +85,9 @@ class KonamikuModule : XposedModule() {
             hook(cls.getDeclaredMethod("isValidSystemCode", String::class.java)).intercept { chain ->
                 val arg = chain.args.firstOrNull() as? String
                 Log.i("KonamikU", "isValidSystemCode($arg) -> true (hooked)")
-                val before = pmmState
-                ensurePmm(param)
-                // Report only on a state transition, not on every card tap.
-                if (pmmState != before) {
-                    sendHookedBroadcast(nfcContext(), pmmState == PmmState.INSTALLED)
-                }
+                // Binder thread, called while an app registers a system
+                // code: the provider query is bounded by the app's own read.
+                ensurePmm(param, nfcContext(), onlyOnChange = true)
                 true
             }
 
@@ -103,8 +114,7 @@ class KonamikuModule : XposedModule() {
                 val cls = param.defaultClassLoader.loadClass(className)
                 hook(cls.getDeclaredMethod("onCreate")).intercept { chain ->
                     val res = chain.proceed()
-                    ensurePmm(param)
-                    sendHookedBroadcast(chain.thisObject as? Context, pmmState == PmmState.INSTALLED)
+                    ensurePmmAsync(param, chain.thisObject as? Context)
                     res
                 }
                 true
@@ -119,12 +129,20 @@ class KonamikuModule : XposedModule() {
             runCatching {
                 hook(android.app.Application::class.java.getDeclaredMethod("onCreate")).intercept { chain ->
                     val res = chain.proceed()
-                    ensurePmm(param)
-                    sendHookedBroadcast(chain.thisObject as? Context, pmmState == PmmState.INSTALLED)
+                    ensurePmmAsync(param, chain.thisObject as? Context)
                     res
                 }
             }
         }
+    }
+
+    /**
+     * Application.onCreate runs on the NFC main thread, and reading the
+     * setting is a binder call that may first have to start the app process.
+     * The first attempt therefore runs off that thread.
+     */
+    private fun ensurePmmAsync(param: PackageLoadedParam, ctx: Context?) {
+        Thread({ ensurePmm(param, ctx, onlyOnChange = false) }, "KonamikU-pmm").start()
     }
 
     /**
@@ -155,42 +173,57 @@ class KonamikuModule : XposedModule() {
 
     /**
      * Makes sure libpmm.so is loaded and its hook is installed, retrying the
-     * hook on later calls when the first attempt found the NCI stack missing.
+     * hook on later calls when the first attempt found the NCI stack missing
+     * or the setting could not be read yet, then reports the state.
      *
-     * Safe and cheap to call repeatedly: once INSTALLED this returns
-     * immediately, and after a temporary miss it only re-resolves the symbol.
+     * Serialised on [pmmLock]: callers come from the NFC main thread's helper
+     * and from binder threads, and only one transition may be in flight. Once
+     * INSTALLED, nothing here can move the state back.
      */
-    private fun ensurePmm(param: PackageLoadedParam) {
-        if (pmmState == PmmState.INSTALLED) return
-
-        pmmState = if (!pmmInjected) {
-            pmmInjected = true
-            val enabled = isPmmEnabled()
-            Log.i("KonamikU", "ensurePmm: pmmEnabled=$enabled")
-            if (enabled) {
-                // Library loading and hook install are separate outcomes:
-                // loading may succeed while the symbol is not yet resolvable.
-                injectPmmtool(param)
-                tryInstallPmmHook()
-            } else {
-                Log.i("KonamikU", "pmmtool disabled by user config")
-                PmmState.NOT_ATTEMPTED
+    private fun ensurePmm(param: PackageLoadedParam, ctx: Context?, onlyOnChange: Boolean) {
+        synchronized(pmmLock) {
+            val before = pmmState
+            if (before != PmmState.INSTALLED && !disabledByUser) {
+                pmmState = advancePmm(param)
             }
-        } else {
-            tryInstallPmmHook().also { state ->
-                if (state == PmmState.INSTALLED) {
-                    Log.i("KonamikU", "pmmtool hook went live on retry")
-                }
+            if (!onlyOnChange || pmmState != before) {
+                sendHookedBroadcast(ctx, pmmState, ++reportSeq)
             }
         }
     }
 
-    private fun sendHookedBroadcast(ctx: Context?, pmmOk: Boolean) {
+    private fun advancePmm(param: PackageLoadedParam): PmmState {
+        if (!libraryLoaded) {
+            when (readPmmEnabled()) {
+                null -> {
+                    Log.i("KonamikU", "ensurePmm: setting unavailable; will ask again")
+                    return pmmState
+                }
+                false -> {
+                    Log.i("KonamikU", "pmmtool disabled by user config")
+                    disabledByUser = true
+                    return PmmState.NOT_ATTEMPTED
+                }
+                true -> Unit
+            }
+            // Library loading and hook install are separate outcomes:
+            // loading may succeed while the symbol is not yet resolvable.
+            libraryLoaded = injectPmmtool(param)
+            if (!libraryLoaded) return PmmState.NOT_ATTEMPTED
+        }
+        return tryInstallPmmHook().also { state ->
+            if (state == PmmState.INSTALLED) Log.i("KonamikU", "pmmtool hook live")
+        }
+    }
+
+    private fun sendHookedBroadcast(ctx: Context?, state: PmmState, seq: Long) {
         ctx?.sendBroadcast(
             android.content.Intent("org.cf0x.konamiku.ACTION_NFC_HOOKED")
                 .setPackage("org.cf0x.konamiku")
-                .putExtra("pmmtool_active", pmmOk)
-                .putExtra("pmmtool_state", pmmState.code)
+                .putExtra("pmmtool_active", state == PmmState.INSTALLED)
+                .putExtra("pmmtool_state", state.code)
+                .putExtra("nfc_instance", processInstance)
+                .putExtra("report_seq", seq)
         )
     }
 

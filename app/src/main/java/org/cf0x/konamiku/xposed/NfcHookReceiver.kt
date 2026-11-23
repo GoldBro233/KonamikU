@@ -32,7 +32,13 @@ class NfcHookReceiver : BroadcastReceiver() {
         } else {
             KonamikuModule.PmmState.NOT_ATTEMPTED
         }
-        Log.i("KonamikU", "NFC hook ping — pmm=$state")
+        val report = Report(
+            state = state,
+            processStart = intent.getStringExtra(EXTRA_INSTANCE)
+                ?.substringAfter(':', "")?.toLongOrNull(),
+            seq = intent.getLongExtra(EXTRA_SEQ, 0L)
+        )
+        Log.i("KonamikU", "NFC hook ping — $report")
 
         // This action cannot be authenticated (the sender is com.android.nfc,
         // a different uid and certificate), so the ping is only honoured once
@@ -41,27 +47,57 @@ class NfcHookReceiver : BroadcastReceiver() {
         // which is half of the condition that unlocks NORMAL/COMPAT mode.
         if (!XposedState.frameworkConfirmed) {
             Log.w("KonamikU", "Deferring hook ping until the framework confirms the module")
-            XposedState.pendingPmmState = state
+            if (XposedState.pendingReport?.let { report.isNewerThan(it) } != false) {
+                XposedState.pendingReport = report
+            }
             return
         }
 
-        applyPing(context, state)
+        applyPing(context, report)
+    }
+
+    /**
+     * One state report from an NFC process.
+     *
+     * @property processStart the reporting process's start time on the
+     *           uptime clock, or null from module builds that predate it.
+     * @property seq the report's order within that process.
+     */
+    data class Report(
+        val state: KonamikuModule.PmmState,
+        val processStart: Long?,
+        val seq: Long
+    ) {
+        /**
+         * Broadcasts are not ordered: a report from a process that has since
+         * restarted, or an earlier report of the same process, must not
+         * overwrite what a later one said. Unversioned reports are taken as is.
+         */
+        fun isNewerThan(other: Report): Boolean {
+            if (processStart == null || other.processStart == null) return true
+            if (processStart != other.processStart) return processStart > other.processStart
+            return seq > other.seq
+        }
     }
 
     companion object {
         const val ACTION_NFC_HOOKED = "org.cf0x.konamiku.ACTION_NFC_HOOKED"
         const val EXTRA_PMM_STATE = "pmmtool_state"
+        const val EXTRA_INSTANCE = "nfc_instance"
+        const val EXTRA_SEQ = "report_seq"
         const val PREFS_NAME = "KonamikU_xposed"
 
-        /** Records a ping the framework has vouched for. */
-        fun applyPing(context: Context, state: KonamikuModule.PmmState) {
-            XposedState.pmmState = state
-            XposedState.activationState = XposedActivationState.ACTIVE
+        /** Records a ping the framework has vouched for, unless a newer one was already applied. */
+        fun applyPing(context: Context, report: Report) {
+            if (!XposedState.applyReport(report)) {
+                Log.i("KonamikU", "Ignoring stale hook ping $report")
+                return
+            }
 
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean("pmmtool_active", state == KonamikuModule.PmmState.INSTALLED)
-                .putInt("pmmtool_state", state.code)
+                .putBoolean("pmmtool_active", report.state == KonamikuModule.PmmState.INSTALLED)
+                .putInt("pmmtool_state", report.state.code)
                 .apply()
         }
     }

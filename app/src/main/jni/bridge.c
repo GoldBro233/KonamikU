@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -58,6 +59,11 @@ static nfa_dm_check_set_config_t orig_nfa_dm_check_set_config = NULL;
 #define PMM_STATE_NO_SYMBOL     3   /* searched, symbol absent on this ROM */
 #define PMM_STATE_HOOK_FAILED   4   /* symbol found, DobbyHook refused */
 
+/* Guards g_hook_state and the DobbyHook call. try_install_hook is reached
+ * from JNI_OnLoad, Application.onCreate and binder threads; without this two
+ * of them could both resolve the symbol and both hook it, and a late
+ * WAITING_NCI result could overwrite INSTALLED. */
+static pthread_mutex_t g_hook_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_hook_state = PMM_STATE_NOT_ATTEMPTED;
 
 static const char *state_name(int state) {
@@ -120,12 +126,12 @@ static int hooked_nfa_dm_check_set_config(uint8_t tlv_len, uint8_t *tlv, int fla
 }
 
 /**
- * Attempt the hook once.
+ * Attempt the hook once. Callers hold g_hook_lock.
  *
- * @return a PMM_STATE_* value. Safe to call repeatedly; once installed it is a
- *         no-op, and after a temporary miss (NCI not mapped) it retries.
+ * @return a PMM_STATE_* value. Once installed it is a no-op, and after a
+ *         temporary miss (NCI not mapped) it retries.
  */
-static int try_install_hook(void) {
+static int try_install_hook_locked(void) {
     if (g_hook_state == PMM_STATE_INSTALLED) {
         return g_hook_state;
     }
@@ -203,6 +209,13 @@ static int try_install_hook(void) {
     LOGW("DobbyHook failed: ret=%d orig=%p -> %s",
          ret, (void *) orig_nfa_dm_check_set_config, state_name(g_hook_state));
     return g_hook_state;
+}
+
+static int try_install_hook(void) {
+    pthread_mutex_lock(&g_hook_lock);
+    int state = try_install_hook_locked();
+    pthread_mutex_unlock(&g_hook_lock);
+    return state;
 }
 
 /**

@@ -117,10 +117,10 @@ class KonamikuApp : Application(), XposedServiceHelper.OnServiceListener {
         // NfcHookReceiver only trusts its ping once this is set.
         if (hooked) {
             XposedState.markFrameworkConfirmed()
-            XposedState.pendingPmmState?.let {
-                Log.i(TAG, "Applying deferred hook ping: pmm=$it")
+            XposedState.pendingReport?.let {
+                Log.i(TAG, "Applying deferred hook ping: $it")
                 NfcHookReceiver.applyPing(this, it)
-                XposedState.pendingPmmState = null
+                XposedState.pendingReport = null
             }
         }
 

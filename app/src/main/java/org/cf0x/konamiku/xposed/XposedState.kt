@@ -38,14 +38,31 @@ object XposedState {
     }
 
     /**
-     * A ping that arrived before [frameworkConfirmed]. The NFC process pings
-     * once per state change, typically while this process is still cold
-     * starting - before the framework has bound - so dropping it would leave
-     * the PMm state unknown until the next NFC restart. It is applied only
-     * after the framework confirms the module is loaded in com.android.nfc.
+     * A report that arrived before [frameworkConfirmed]. The NFC process
+     * reports once per state change, typically while this process is still
+     * cold starting - before the framework has bound - so dropping it would
+     * leave the PMm state unknown until the next NFC restart. It is applied
+     * only after the framework confirms the module is loaded in com.android.nfc.
      */
     @Volatile
-    var pendingPmmState: KonamikuModule.PmmState? = null
+    var pendingReport: NfcHookReceiver.Report? = null
+
+    private var lastReport: NfcHookReceiver.Report? = null
+
+    /**
+     * Applies [report] unless a newer one from the NFC process was already
+     * applied; see [NfcHookReceiver.Report.isNewerThan].
+     *
+     * @return whether the report was applied.
+     */
+    @Synchronized
+    fun applyReport(report: NfcHookReceiver.Report): Boolean {
+        if (lastReport?.let { report.isNewerThan(it) } == false) return false
+        lastReport = report
+        pmmState = report.state
+        activationState = XposedActivationState.ACTIVE
+        return true
+    }
 
     val activationStateFlow:  StateFlow<XposedActivationState> = _activationState.asStateFlow()
     val frameworkNameFlow:    StateFlow<String>  = _frameworkName.asStateFlow()
@@ -76,8 +93,10 @@ object XposedState {
             _pmmActive.value = v == KonamikuModule.PmmState.INSTALLED
         }
 
+    @Synchronized
     fun reset() {
         frameworkConfirmed      = false
+        lastReport              = null
         _activationState.value  = XposedActivationState.INACTIVE
         _frameworkName.value    = ""
         _frameworkVersion.value = ""
