@@ -2,11 +2,9 @@ package org.cf0x.konamiku.ui.screens
 
 import android.Manifest
 import android.app.Activity
-import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
-import android.nfc.cardemulation.NfcFCardEmulation
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -71,7 +69,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.cf0x.konamiku.R
@@ -81,8 +78,7 @@ import org.cf0x.konamiku.data.EmuMode
 import org.cf0x.konamiku.data.JsonManager
 import org.cf0x.konamiku.data.NfcCard
 import org.cf0x.konamiku.nfc.EmuCard
-import org.cf0x.konamiku.nfc.SYSTEM_CODE_FELICA
-import org.cf0x.konamiku.nfc.resolveActiveIdm
+import org.cf0x.konamiku.nfc.EmulationController
 import org.cf0x.konamiku.notification.LiveUpdateManager
 import org.cf0x.konamiku.ui.components.NfcCardItem
 import org.cf0x.konamiku.ui.components.StatusIndicatorBar
@@ -104,31 +100,18 @@ fun MainScreen(dataStore: AppDataStore, statusViewModel: StatusViewModel) {
     var showDialog      by remember { mutableStateOf(false) }
     var isLoading       by remember { mutableStateOf(true) }
 
-    val activeCardId    by dataStore.activeCardId.collectAsState(initial = null)
-    val emuMode         by dataStore.emuMode.collectAsState(initial = EmuMode.NORMAL)
-    val devModeForceEmu by dataStore.devModeForceEmu.collectAsState(initial = false)
-    val backgroundEmu by dataStore.backgroundEmulation.collectAsState(initial = false)
+    val session            by EmulationController.session.collectAsState()
+    // null until DataStore answers: an unknown capability must not rewrite
+    // the effective mode of a running session.
+    val devModeForceEmu    by dataStore.devModeForceEmu.collectAsState(initial = null)
+    val activeNotification by dataStore.activeNotification.collectAsState(initial = false)
 
     val xposedState  by XposedState.activationStateFlow.collectAsState()
     val pmmActive    by XposedState.pmmActiveFlow.collectAsState()
-    val modeUnlocked = ((xposedState == XposedActivationState.ACTIVE) && pmmActive) || devModeForceEmu
+    val modeUnlocked = ((xposedState == XposedActivationState.ACTIVE) && pmmActive) || devModeForceEmu == true
 
-    LaunchedEffect(modeUnlocked) {
-        if (!modeUnlocked && emuMode != EmuMode.NATIVE) {
-            dataStore.saveEmuMode(EmuMode.NATIVE)
-        }
-    }
-
-    val nfcAdapter       = remember { NfcAdapter.getDefaultAdapter(context) }
-    val serviceComponent = remember { ComponentName(context, EmuCard::class.java) }
-
-    /** 
-     * Always obtain a fresh NfcFCardEmulation instance.
-     * The cached instance becomes a dead binder after NFC process restarts (HyperOS). 
-     */
-    fun freshEmulation() = nfcAdapter?.let {
-        runCatching { NfcFCardEmulation.getInstance(it) }.getOrNull()
-    }
+    /** The card keeps the user's preference; this is the mode that can run now. */
+    fun effectiveMode(card: NfcCard): EmuMode = if (modeUnlocked) card.emuMode else EmuMode.NATIVE
 
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -155,97 +138,53 @@ fun MainScreen(dataStore: AppDataStore, statusViewModel: StatusViewModel) {
         }
     }
 
+    val activeCardId = session?.card?.id
     LaunchedEffect(activeCardId) {
         if (activeCardId != null && expandedId == null) expandedId = activeCardId
     }
 
-    // Restore the foreground notification for an already-active card.
-    // `cards` and `isLoading` must be keys: on a cold start activeCardId is
-    // restored from DataStore before the card list finishes loading, so the
-    // lookup below would miss and this effect would never re-run.
-    LaunchedEffect(emuMode, activeCardId, cards, backgroundEmu, isLoading) {
-        if (isLoading) return@LaunchedEffect
-        if (activeCardId != null) {
-            val card = cards.find { it.id == activeCardId } ?: return@LaunchedEffect
-            if (backgroundEmu) {
-                LiveUpdateManager.postActive(context, card.name, card.emuMode)
-            }
-        }
+    fun failureMessage(reason: EmulationController.Failure): Int? = when (reason) {
+        EmulationController.Failure.NO_ACTIVITY     -> R.string.emu_err_no_activity
+        EmulationController.Failure.NFC_UNAVAILABLE -> R.string.emu_err_nfc_unavailable
+        EmulationController.Failure.REJECTED        -> R.string.emu_err_rejected
+        EmulationController.Failure.ENABLE_FAILED   -> R.string.emu_err_enable_failed
+        // A newer request (another card, a stop) replaced this one.
+        EmulationController.Failure.SUPERSEDED      -> null
     }
 
-    // Auto-activate from QS tile / external intent
     fun activateCard(card: NfcCard) {
         scope.launch {
-            if (backgroundEmu && Build.VERSION.SDK_INT >= 33 &&
+            val mode = effectiveMode(card)
+            if (activeNotification && mode != EmuMode.NATIVE && Build.VERSION.SDK_INT >= 33 &&
                 context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
                 notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
-
-            val mode   = card.emuMode
-            val activeIdm = resolveActiveIdm(card.idm, mode)
-            android.util.Log.i("KonamikU", "Activating card: ${card.name} [IDm: $activeIdm] (mode: $mode)")
-            val activity = context as? ComponentActivity
-            if (activity == null) {
-                dataStore.saveActiveCardId(card.id)
-                if (backgroundEmu) {
-                    LiveUpdateManager.postActive(context, card.name, mode)
-                }
-                return@launch
-            }
-            runCatching {
-                val emulation = freshEmulation() ?: throw IllegalStateException("NFC not available")
-
-                // Align with aicemu sequence: disable -> setIDm -> registerSys -> enable
-                emulation.disableService(activity)
-
-                val resultIdm = emulation.setNfcid2ForService(serviceComponent, activeIdm)
-                val resultSys = emulation.registerSystemCodeForService(serviceComponent, SYSTEM_CODE_FELICA)
-
-                if (!resultIdm || !resultSys) {
-                    android.util.Log.w("KonamikU", "NFC setup partial failure: IDm=$resultIdm, Sys=$resultSys. Retrying...")
-                    delay(300)
-                    emulation.setNfcid2ForService(serviceComponent, activeIdm)
-                    emulation.registerSystemCodeForService(serviceComponent, SYSTEM_CODE_FELICA)
-                }
-
-                emulation.enableService(activity, serviceComponent)
-            }.onFailure { e ->
-                android.util.Log.e("KonamikU", "NFC registration failed: ${e.message}")
-                if (e is android.os.DeadObjectException || e.message?.contains("Failed to reach") == true) {
-                    android.util.Log.i("KonamikU", "Attempting binder recovery...")
-                    org.cf0x.konamiku.util.NfcRestart.clearNfcFCache()
-                }
-            }
-            dataStore.saveActiveCardId(card.id)
-            // The HCE-F service instance outlives this screen, so tell it the
-            // active card changed; otherwise it keeps answering with the old
-            // IDm and block data.
-            EmuCard.invalidateCard()
-            if (backgroundEmu) {
-                LiveUpdateManager.postActive(context, card.name, mode)
+            val outcome = EmulationController.activate(context, card, mode, activeNotification)
+            if (outcome is EmulationController.Outcome.Failed) {
+                failureMessage(outcome.reason)?.let { snackbarState.showSnackbar(context.getString(it)) }
             }
         }
     }
 
     fun deactivateCard() {
-        scope.launch {
-            runCatching {
-                val activity = context as? Activity ?: return@launch
-                freshEmulation()?.disableService(activity)
-            }
-            dataStore.saveActiveCardId(null)
-            EmuCard.invalidateCard()
-            LiveUpdateManager.cancel(context)
-        }
+        scope.launch { EmulationController.deactivate(context) }
+    }
+
+    // Capability arriving or going away re-evaluates the current selection
+    // only. After an explicit stop there is no session, so nothing revives.
+    LaunchedEffect(modeUnlocked, devModeForceEmu != null) {
+        if (devModeForceEmu == null) return@LaunchedEffect
+        val current = EmulationController.session.value ?: return@LaunchedEffect
+        if (effectiveMode(current.card) != current.mode) activateCard(current.card)
     }
 
     // Auto-activate from shortcut / external intent
     val activity = context as? ComponentActivity
     var lastIntentId by remember { mutableStateOf<String?>(null) }
     val currentIntentId = activity?.intent?.getStringExtra(EmuCard.EXTRA_AUTO_ACTIVATE)
-    LaunchedEffect(currentIntentId, cards, isLoading) {
-        if (currentIntentId != null && currentIntentId != lastIntentId && !isLoading) {
+    LaunchedEffect(currentIntentId, cards, isLoading, devModeForceEmu != null) {
+        if (currentIntentId != null && currentIntentId != lastIntentId && !isLoading && devModeForceEmu != null) {
             lastIntentId = currentIntentId
             val card = cards.find { it.id == currentIntentId } ?: return@LaunchedEffect
             @Suppress("UNNECESSARY_SAFE_CALL")
@@ -316,7 +255,7 @@ fun MainScreen(dataStore: AppDataStore, statusViewModel: StatusViewModel) {
                                     card              = card,
                                     isExpanded        = isExpanded,
                                     isActive          = isActive,
-                                    emuMode           = card.emuMode,
+                                    emuMode           = effectiveMode(card),
                                     onExpandClick     = {
                                         expandedId = if (isExpanded) null else card.id
                                     },
@@ -341,15 +280,20 @@ fun MainScreen(dataStore: AppDataStore, statusViewModel: StatusViewModel) {
                                             val updated = card.copy(emuMode = next)
                                             cards = cards.map { if (it.id == card.id) updated else it }
                                             withContext(Dispatchers.IO) { jsonManager.saveCards(cards) }
-                                            if (isActive) activateCard(updated)
+                                            if (EmulationController.session.value?.card?.id == card.id) {
+                                                activateCard(updated)
+                                            }
                                         }
                                     },
                                     onDeleteConfirmed = {
-                                        if (isActive) deactivateCard()
-                                        cards = cards.filterNot { it.id == card.id }
-                                        if (expandedId == card.id) expandedId = null
-                                        scope.launch(Dispatchers.IO) {
-                                            jsonManager.saveCards(cards)
+                                        scope.launch {
+                                            // The responder must be gone before its card is.
+                                            if (EmulationController.session.value?.card?.id == card.id) {
+                                                EmulationController.deactivate(context)
+                                            }
+                                            cards = cards.filterNot { it.id == card.id }
+                                            if (expandedId == card.id) expandedId = null
+                                            withContext(Dispatchers.IO) { jsonManager.saveCards(cards) }
                                         }
                                     }
                                 )

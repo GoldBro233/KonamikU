@@ -15,8 +15,7 @@ import org.json.JSONObject
 class FelicaCard(
     context: Context,
     val activeIdm: String,
-    val realIdm: String,
-    val emuMode: EmuMode
+    val realIdm: String
 ) {
     companion object {
         private const val TAG = "KonamikU-FelicaCard"

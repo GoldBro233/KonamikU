@@ -20,9 +20,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.cf0x.konamiku.R
 import org.cf0x.konamiku.data.AppDataStore
-import org.cf0x.konamiku.notification.LiveUpdateManager
+import org.cf0x.konamiku.nfc.EmulationController
 import org.cf0x.konamiku.system.StatusDetector
 import org.cf0x.konamiku.util.NfcRestart
+import org.cf0x.konamiku.util.localized
 import org.cf0x.konamiku.util.restartApp
 import org.cf0x.konamiku.xposed.XposedActivationState
 import org.cf0x.konamiku.xposed.XposedState
@@ -119,24 +120,11 @@ class StatusViewModel(application: Application) : AndroidViewModel(application) 
     fun confirmAction() {
         val action = _pendingAction.value ?: return
         _pendingAction.value = null
-        deactivateActiveCard()
         when (action) {
             PendingAction.NfcEnable     -> executeNfcEnable()
             PendingAction.NfcRestart    -> executeNfcRestart()
+            // Read-only: looking at the status must not end the session.
             PendingAction.XposedRefresh -> executeXposedRefresh()
-        }
-    }
-
-    /**
-     * Deactivates all active emulated cards: clears the active card ID from
-     * DataStore, removes the foreground notification, and clears the NFC
-     * binder cache so the EmuCard service picks up the fresh state.
-     */
-    private fun deactivateActiveCard() {
-        viewModelScope.launch(Dispatchers.IO) {
-            dataStore.saveActiveCardId(null)
-            LiveUpdateManager.cancel(context)
-            NfcRestart.clearNfcFCache()
         }
     }
 
@@ -184,40 +172,24 @@ class StatusViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun executeNfcRestart() {
         viewModelScope.launch {
-            val result = NfcRestart.restart(context) { step, oldPid, newPid ->
-                when (step) {
-                    NfcRestart.Step.KILL_PROCESS -> {
-                        if (oldPid != null) {
-                            _toastEvent.emit(str(R.string.toast_nfc_pid_killed, oldPid.toString()))
-                        }
-                    }
-                    NfcRestart.Step.ENABLE_NFC -> {
-                        _toastEvent.emit(str(R.string.toast_nfc_service_refreshed))
-                    }
-                    NfcRestart.Step.CLEAR_CACHE -> {
-                        _toastEvent.emit(str(R.string.toast_nfc_restarting))
-                    }
-                    NfcRestart.Step.DONE -> {
-                        if (newPid != null && newPid != oldPid && oldPid != null) {
-                            _toastEvent.emit(str(R.string.toast_nfc_pid_restarted, newPid.toString()))
-                        }
-                        refreshNfc()
-                        runCatching {
-                            android.service.quicksettings.TileService.requestListeningState(
-                                context,
-                                ComponentName(context, org.cf0x.konamiku.system.KonamikuTileService::class.java)
-                            )
-                        }
-                    }
-                    else -> { /* CAPTURE_PID, DISABLE_NFC, NFC_READY, CHECK_PID — no toast needed */ }
-                }
+            // The session ends before the service goes away, not alongside it.
+            EmulationController.deactivate(context)
+            _toastEvent.emit(str(R.string.toast_nfc_restarting))
+            val result = NfcRestart.restart(context)
+            NfcRestart.messages(context.localized(), result).forEach { _toastEvent.emit(it) }
+            refreshNfc()
+            runCatching {
+                android.service.quicksettings.TileService.requestListeningState(
+                    context,
+                    ComponentName(context, org.cf0x.konamiku.system.KonamikuTileService::class.java)
+                )
             }
 
             // Only ask for an app restart when the proxy probe failed. Dropping
             // the binder caches is normally enough to rebind in-process, and
             // prompting unconditionally was the reason every NFC restart ended
             // with a restart prompt.
-            if (!result.proxyReachable) {
+            if (result.before != NfcRestart.Lookup.Unavailable && !result.proxyReachable) {
                 Log.w(TAG, "HCE-F proxy unreachable after restart ($result) — asking for app restart")
                 _showRestartDialog.value = true
             }

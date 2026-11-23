@@ -35,8 +35,6 @@
     <string name="notif_channel_desc">KonamikU NFC 卡片模拟状态</string>
     <string name="notif_progress_simulated">已模拟</string>
     <string name="notif_action_stop">停止</string>
-    <string name="notif_action_switch_mode">切换模式</string>
-    <string name="notif_action_next_card">下一张卡</string>
 
     <string name="status_nfc_rf">NFC 射频</string>
     <string name="status_lsposed">LSPosed</string>
@@ -169,13 +167,24 @@
     <string name="update_cancel">取消</string>
     <string name="update_retry">重试</string>
     <string name="update_open_browser">浏览器打开</string>
-    <string name="update_dismiss">关闭</string>    <string name="update_install_failed">更新失败</string>
+    <string name="update_dismiss">关闭</string>
+    <string name="update_install_failed">更新失败</string>
     <string name="update_install_failed_desc">无法安装该安装包。</string>
-        <string name="update_err_timeout">下载已 30 秒无进展。可切换更新源，或改用浏览器打开。</string>
-<string name="update_err_download">下载失败，请检查网络或切换更新源。</string>
+    <string name="update_err_timeout">下载已 30 秒无进展。可切换更新源，或改用浏览器打开。</string>
+    <string name="update_err_download">下载失败，请检查网络或切换更新源。</string>
     <string name="update_err_permission">请允许 KonamikU 安装未知来源应用后重试。</string>
     <string name="update_err_install">系统拒绝了安装。</string>
-    <string name="notif_channel_update">应用更新</string><string name="setting_update_interval_off">关闭</string>
+    <string name="update_err_aborted">安装已取消。</string>
+    <string name="update_err_interrupted">更新未完成即中断，请重试。</string>
+    <string name="update_downloading_unknown">正在下载…</string>
+    <string name="update_downloading_retry_unknown">镜像不可用，正在直连重试…</string>
+    <string name="update_hide">隐藏</string>
+    <string name="update_confirm_title">确认更新</string>
+    <string name="update_confirm_desc">KonamikU %1$s 已下载完成，继续以确认安装。</string>
+    <string name="update_continue_install">继续</string>
+    <string name="notif_channel_update_download">更新下载</string>
+    <string name="notif_channel_update">应用更新</string>
+    <string name="setting_update_interval_off">关闭</string>
     <string name="setting_update_interval_30min">30 分钟</string>
     <string name="setting_update_interval_1h">1 小时</string>
     <string name="setting_update_interval_2h">2 小时</string>
@@ -207,9 +216,9 @@
     <string name="dialog_nfc_restart_desc">通过 root 重启 NFC 服务？\n\n将终止并重新启动 com.android.nfc。</string>
     <string name="dialog_xposed_refresh_title">刷新 LSPosed</string>
     <string name="dialog_xposed_refresh_desc">重新检查 LSPosed 模块状态？</string>
-    <string name="toast_nfc_pid_killed">com.android.nfc 进程 %s 已终止</string>
     <string name="toast_nfc_restarting">com.android.nfc 正在重启</string>
-    <string name="toast_nfc_pid_restarted">com.android.nfc 进程 %s 已重启</string>
+    <string name="toast_nfc_restart_ambiguous">存在多个 com.android.nfc 进程（%1$s），未终止任何进程</string>
+    <string name="toast_nfc_restart_unconfirmed">已向 com.android.nfc（pid:%1$s）发送终止信号，但未发现新进程</string>
     <string name="toast_nfc_service_refreshed">NFC 已刷新</string>
 
     <string name="restart_app_dialog_msg">NFC 服务已重启，但本应用无法再连接到它。</string>
@@ -221,7 +230,11 @@
 
     <string name="setting_pmm_restart_msg">需要重启NFC服务以生效</string>
 
-    <string name="setting_background_emu">后台模拟</string>
-    <string name="setting_background_emu_desc">允许在后台或锁屏时继续模拟卡片。关闭后仅在前台运行时模拟。</string>
-    <string name="setting_background_emu_warn">可能与其他 NFC 应用产生服务冲突。仅在需要锁屏模拟时开启。</string>
+    <string name="setting_active_notification">激活时显示通知</string>
+    <string name="setting_active_notification_desc">卡片激活期间显示通知。仅在 KonamikU 位于前台时可模拟。</string>
+
+    <string name="emu_err_no_activity">请保持 KonamikU 在前台再激活卡片：仅在应用位于前台时可模拟。</string>
+    <string name="emu_err_nfc_unavailable">NFC 不可用。请开启 NFC 后重试。</string>
+    <string name="emu_err_rejected">NFC 服务拒绝了此卡的 IDm 或系统码。</string>
+    <string name="emu_err_enable_failed">NFC 服务未为本应用启用模拟。</string>
 </resources>

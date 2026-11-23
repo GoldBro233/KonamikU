@@ -231,7 +231,10 @@ object UpdateManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, "konamiku_live_important")
+        // The emulation channel is only created by the card screen, so a
+        // background check could post into a channel that does not exist.
+        UpdateTask.ensureChannels(context)
+        val notification = NotificationCompat.Builder(context, UpdateTask.CHANNEL_ALERT)
             .setSmallIcon(R.mipmap.ic_launcher_round)
             .setContentTitle(context.getString(R.string.setting_update_new_title))
             .setContentText(context.getString(R.string.setting_update_new_msg, version))

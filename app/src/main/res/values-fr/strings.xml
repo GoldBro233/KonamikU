@@ -34,8 +34,6 @@
     <string name="notif_channel_desc">Statut d\'émulation NFC KonamikU</string>
     <string name="notif_progress_simulated">Simulé</string>
     <string name="notif_action_stop">Arrêter</string>
-    <string name="notif_action_switch_mode">Changer de mode</string>
-    <string name="notif_action_next_card">Carte suivante</string>
 
     <string name="status_nfc_rf">Radio NFC</string>
     <string name="status_lsposed">LSPosed</string>
@@ -179,9 +177,7 @@
     <string name="dialog_nfc_restart_desc">Redémarrer le service NFC via root ?\n\nCela tuera et redémarrera com.android.nfc.</string>
     <string name="dialog_xposed_refresh_title">Actualiser LSPosed</string>
     <string name="dialog_xposed_refresh_desc">Re-vérifier l\'état du module LSPosed ?</string>
-    <string name="toast_nfc_pid_killed">com.android.nfc pid %s terminé</string>
     <string name="toast_nfc_restarting">com.android.nfc redémarre</string>
-    <string name="toast_nfc_pid_restarted">com.android.nfc pid %s redémarré</string>
     <string name="toast_nfc_service_refreshed">NFC actualisé</string>
 
     <string name="restart_app_dialog_msg">Le service NFC a redémarré, mais cette application ne peut plus le joindre.</string>
@@ -193,7 +189,52 @@
 
     <string name="setting_pmm_restart_msg">Redémarrer le service NFC pour appliquer le changement ?</string>
 
-    <string name="setting_background_emu">Émulation en arrière-plan</string>
-    <string name="setting_background_emu_desc">Continuer l\'émulation en arrière-plan ou écran verrouillé. Désactiver pour n\'émuler que lorsque l\'application est ouverte.</string>
-    <string name="setting_background_emu_warn">Peut causer des conflits avec d\'autres applications NFC. N\'activer que si l\'émulation sur écran verrouillé est nécessaire.</string>
+    <string name="setting_active_notification">Notification pendant l\'activation</string>
+    <string name="setting_active_notification_desc">Afficher une notification lorsqu\'une carte est active. L\'émulation ne fonctionne que lorsque KonamikU est au premier plan.</string>
+
+    <string name="notif_channel_update">Mises à jour de l\'application</string>
+    <string name="notif_channel_update_download">Téléchargements de mises à jour</string>
+    <string name="setting_update_err_blocked">La source de mise à jour a refusé la requête (limite de débit). Réessayez plus tard ou changez de source.</string>
+    <string name="setting_update_err_invalid">Les informations de mise à jour sont mal formées. Il s\'agit d\'un problème côté serveur, merci de le signaler.</string>
+    <string name="setting_update_err_network">Réseau inaccessible. Vérifiez votre connexion ou changez de source de mise à jour dans les paramètres.</string>
+    <string name="setting_update_err_not_found">Informations de mise à jour introuvables. Le serveur ne les a pas encore publiées.</string>
+    <string name="setting_update_err_nourl">Aucune URL de mise à jour configurée.</string>
+    <string name="status_pmm_installed">Injecté</string>
+    <string name="status_pmm_waiting">En attente de la pile NFC</string>
+    <string name="status_pmm_waiting_hint">Approchez une carte une fois pour terminer la configuration.</string>
+    <string name="status_pmm_no_symbol">Symbole introuvable</string>
+    <string name="status_pmm_no_symbol_hint">La pile NFC de cet appareil n\'exporte pas le symbole cible ; le hook ne peut pas être installé ici.</string>
+    <string name="status_pmm_hook_failed">Hook refusé</string>
+    <string name="status_pmm_hook_failed_hint">Le symbole a été trouvé mais le correctif a été refusé. Une mise à jour de la ROM a peut-être modifié la fonction.</string>
+    <string name="status_pmm_idle">Non chargé</string>
+    <string name="status_pmm_idle_hint">Désactivé dans les paramètres.</string>
+    <string name="update_title">Mise à jour de KonamikU</string>
+    <string name="update_downloading">Téléchargement… %1$d%%</string>
+    <string name="update_downloading_retry">Miroir indisponible, nouvel essai en direct… %1$d%%</string>
+    <string name="update_downloading_unknown">Téléchargement…</string>
+    <string name="update_downloading_retry_unknown">Miroir indisponible, nouvel essai en direct…</string>
+    <string name="update_installing">Installation…</string>
+    <string name="update_cancel">Annuler</string>
+    <string name="update_hide">Masquer</string>
+    <string name="update_retry">Réessayer</string>
+    <string name="update_open_browser">Ouvrir dans le navigateur</string>
+    <string name="update_dismiss">Fermer</string>
+    <string name="update_confirm_title">Confirmer la mise à jour</string>
+    <string name="update_confirm_desc">KonamikU %1$s est téléchargé. Continuez pour confirmer l\'installation.</string>
+    <string name="update_continue_install">Continuer</string>
+    <string name="update_install_failed">Échec de la mise à jour</string>
+    <string name="update_install_failed_desc">Le paquet n\'a pas pu être installé.</string>
+    <string name="update_err_timeout">Le téléchargement est bloqué depuis 30 secondes. Changez de source de mise à jour ou ouvrez la page dans un navigateur.</string>
+    <string name="update_err_download">Échec du téléchargement. Vérifiez votre réseau ou changez de source de mise à jour.</string>
+    <string name="update_err_permission">Autorisez KonamikU à installer des applications inconnues, puis réessayez.</string>
+    <string name="update_err_install">L\'installation a été refusée par le système.</string>
+    <string name="update_err_aborted">L\'installation a été annulée.</string>
+    <string name="update_err_interrupted">La mise à jour s\'est arrêtée avant la fin. Réessayez.</string>
+
+    <string name="toast_nfc_restart_ambiguous">Plusieurs processus com.android.nfc (%1$s) ; aucun n\'a été arrêté</string>
+    <string name="toast_nfc_restart_unconfirmed">Arrêt envoyé à com.android.nfc (pid:%1$s), mais aucun nouveau processus n\'a été détecté</string>
+    <string name="emu_err_no_activity">Gardez KonamikU ouvert pour activer une carte : l\'émulation ne fonctionne qu\'au premier plan.</string>
+    <string name="emu_err_nfc_unavailable">NFC indisponible. Activez le NFC et réessayez.</string>
+    <string name="emu_err_rejected">Le service NFC a refusé l\'IDm ou le code système de cette carte.</string>
+    <string name="emu_err_enable_failed">Le service NFC n\'a pas activé l\'émulation pour cette application.</string>
 </resources>

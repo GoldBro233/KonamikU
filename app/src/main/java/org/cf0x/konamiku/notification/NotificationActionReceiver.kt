@@ -3,72 +3,29 @@ package org.cf0x.konamiku.notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
-import org.cf0x.konamiku.data.AppDataStore
-import org.cf0x.konamiku.data.EmuMode
-import org.cf0x.konamiku.data.JsonManager
-import org.cf0x.konamiku.data.loadActiveCard
-import org.cf0x.konamiku.nfc.EmuCard
-import org.cf0x.konamiku.nfc.updateHceRegistration
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import org.cf0x.konamiku.nfc.EmulationController
 
 /**
- * Handles notification action buttons while the emulation service is active.
- * Uses a [SupervisorJob]-scoped coroutine so that individual action failures
- * don't cancel sibling actions.
+ * Stop and swipe-away on the "card active" notification. Both name the
+ * session that posted the notification, so neither can end a newer one.
  */
 class NotificationActionReceiver : BroadcastReceiver() {
 
-    companion object {
-        private const val TAG = "KonamikU-NotifAct"
-    }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != LiveUpdateManager.ACTION_STOP &&
+            intent.action != LiveUpdateManager.ACTION_DISMISSED
+        ) return
+        val sessionId = intent.getLongExtra(LiveUpdateManager.EXTRA_SESSION_ID, -1L)
         val pending = goAsync()
         scope.launch {
             try {
-                val dataStore   = AppDataStore(context)
-                val jsonManager = JsonManager(context)
-                when (intent.action) {
-                    LiveUpdateManager.ACTION_TOGGLE_ACTIVATE -> {
-                        dataStore.saveActiveCardId(null)
-                        EmuCard.invalidateCard()
-                        LiveUpdateManager.cancel(context)
-                    }
-                    LiveUpdateManager.ACTION_TOGGLE_MODE -> {
-                        val active = context.loadActiveCard() ?: return@launch
-                        val next = when (active.mode) {
-                            EmuMode.NORMAL -> EmuMode.COMPAT
-                            EmuMode.COMPAT -> EmuMode.NATIVE
-                            EmuMode.NATIVE -> EmuMode.NORMAL
-                        }
-                        val updated = active.card.copy(emuMode = next)
-                        jsonManager.saveCards(
-                            jsonManager.loadCards().map { if (it.id == updated.id) updated else it }
-                        )
-                        LiveUpdateManager.postActive(context, updated.name, next)
-                        updateHceRegistration(context, updated.idm, next)
-                    }
-                    LiveUpdateManager.ACTION_NEXT_CARD -> {
-                        val cards = jsonManager.loadCards()
-                        if (cards.isEmpty()) return@launch
-                        val activeId = dataStore.activeCardId.first()
-                        val currentIndex = cards.indexOfFirst { it.id == activeId }
-                        val nextIndex = (currentIndex + 1) % cards.size
-                        val nextCard = cards[nextIndex]
-
-                        dataStore.saveActiveCardId(nextCard.id)
-                        LiveUpdateManager.postActive(context, nextCard.name, nextCard.emuMode)
-                        updateHceRegistration(context, nextCard.idm, nextCard.emuMode)
-                    }
-                    LiveUpdateManager.ACTION_DISMISSED -> {
-                        dataStore.saveActiveCardId(null)
-                        EmuCard.invalidateCard()
-                    }
-                    else -> {} // unknown action, ignore
-                }
+                EmulationController.deactivateIfCurrent(context, sessionId)
             } finally {
                 pending.finish()
             }

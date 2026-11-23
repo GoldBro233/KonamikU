@@ -7,14 +7,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
 val CardListRefreshEvent = MutableStateFlow(0L)
-
-data class ActiveCard(val card: NfcCard, val mode: EmuMode)
 
 @Serializable
 data class NfcCard(
@@ -23,23 +20,6 @@ data class NfcCard(
     val idm: String,
     val emuMode: EmuMode = EmuMode.NORMAL
 )
-
-/**
- * Loads the currently active card with its mode, or null if none is selected.
- *
- * The mode is the card's own. That is the mode the UI shows and the one its
- * IDm was registered with (MainScreen.activateCard); answering reads with the
- * global emu_mode instead left a NORMAL-registered card silent whenever the
- * global value was NATIVE, which the mode lock writes on every cold start
- * before the Xposed service has bound.
- */
-suspend fun Context.loadActiveCard(): ActiveCard? {
-    val dataStore = AppDataStore(this)
-    val jsonManager = JsonManager(this)
-    val activeId = dataStore.activeCardId.first() ?: return null
-    val card = jsonManager.loadCards().find { it.id == activeId } ?: return null
-    return ActiveCard(card, card.emuMode)
-}
 
 class JsonManager(private val context: Context) {
 
@@ -50,11 +30,11 @@ class JsonManager(private val context: Context) {
          * Process-wide lock for cards.json.
          *
          * This lives on the companion, not the instance: JsonManager is
-         * constructed in five places (MainScreen, SettingScreen, TileService,
-         * NotificationActionReceiver, loadActiveCard), so a per-instance mutex
-         * would let any two of them read and write the file concurrently:
-         * a half-written read decodes to an empty list, which the next
-         * loadCards() would then persist, wiping the user's cards.
+         * constructed in several places (MainScreen, SettingScreen,
+         * TileService), so a per-instance mutex would let any two of them
+         * read and write the file concurrently: a half-written read decodes
+         * to an empty list, which the next loadCards() would then persist,
+         * wiping the user's cards.
          */
         private val FILE_LOCK = Mutex()
     }

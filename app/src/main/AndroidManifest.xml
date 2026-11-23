@@ -85,9 +85,7 @@
             android:name=".notification.NotificationActionReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="org.cf0x.konamiku.ACTION_TOGGLE_ACTIVATE" />
-                <action android:name="org.cf0x.konamiku.ACTION_TOGGLE_MODE" />
-                <action android:name="org.cf0x.konamiku.ACTION_NEXT_CARD" />
+                <action android:name="org.cf0x.konamiku.ACTION_STOP_EMULATION" />
                 <action android:name="org.cf0x.konamiku.ACTION_NOTIF_DISMISSED" />
             </intent-filter>
         </receiver>

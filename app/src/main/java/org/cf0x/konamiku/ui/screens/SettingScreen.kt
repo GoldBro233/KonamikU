@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Colorize
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RoundedCorner
 import androidx.compose.material.icons.outlined.Schedule
@@ -97,12 +98,13 @@ import org.cf0x.konamiku.data.UpdateInterval
 import org.cf0x.konamiku.data.UpdateFailure
 import org.cf0x.konamiku.data.UpdateMode
 import org.cf0x.konamiku.system.UpdateChecker
-import org.cf0x.konamiku.system.UpdateInstaller
 import org.cf0x.konamiku.system.UpdateDownloadService
+import org.cf0x.konamiku.system.UpdateTask
 import org.cf0x.konamiku.system.UpdateManager
 import org.cf0x.konamiku.ui.components.ColorPickerWheel
 import org.cf0x.konamiku.ui.components.RestartAppDialog
 import org.cf0x.konamiku.ui.components.SegmentSwitch
+import org.cf0x.konamiku.nfc.EmulationController
 import org.cf0x.konamiku.util.NfcRestart
 import org.cf0x.konamiku.util.restartApp
 import org.cf0x.konamiku.util.applyLocale
@@ -124,7 +126,7 @@ fun SettingScreen(dataStore: AppDataStore) {
     // replaces them with the persisted values before anything is shown.
     var devModeForce by remember { mutableStateOf(false) }
     var pmmEnabled by remember { mutableStateOf(true) }
-    var backgroundEmu by remember { mutableStateOf(false) }
+    var activeNotification by remember { mutableStateOf(false) }
     var showPmmRestartDialog by remember { mutableStateOf(false) }
     var pendingPmmValue by remember { mutableStateOf(false) }
     var showNfcRestartCompleteDialog by remember { mutableStateOf(false) }
@@ -138,7 +140,7 @@ fun SettingScreen(dataStore: AppDataStore) {
         savedColor   = dataStore.presetColor.first()
         devModeForce = dataStore.devModeForceEmu.first()
         pmmEnabled = dataStore.pmmEnabled.first()
-        backgroundEmu = dataStore.backgroundEmulation.first()
+        activeNotification = dataStore.activeNotification.first()
         isExpressive = dataStore.themeExpressive.first()
         paletteStyle = dataStore.paletteStyle.first()
         loaded       = true
@@ -251,13 +253,13 @@ fun SettingScreen(dataStore: AppDataStore) {
             NfcSettingsItem(context)
         }
 
-        // --- Group 7: Emulation Scope ---
+        // --- Group 7: Active-card notification ---
         SettingGroup {
-            BackgroundEmuItem(
-                backgroundEmu = backgroundEmu,
+            ActiveNotificationItem(
+                enabled = activeNotification,
                 onToggle = { v ->
-                    backgroundEmu = v
-                    scope.launch { dataStore.saveBackgroundEmulation(v) }
+                    activeNotification = v
+                    scope.launch { dataStore.saveActiveNotification(v) }
                 }
             )
         }
@@ -309,34 +311,18 @@ fun SettingScreen(dataStore: AppDataStore) {
                     pmmEnabled = pendingPmmValue
                     scope.launch {
                         dataStore.savePmmEnabled(pendingPmmValue)
-                        val result = NfcRestart.restart(context) { step, oldPid, newPid ->
-                            withContext(Dispatchers.Main) {
-                                when (step) {
-                                    NfcRestart.Step.KILL_PROCESS -> {
-                                        if (oldPid != null) {
-                                            Toast.makeText(context, context.getString(R.string.toast_nfc_pid_killed, oldPid.toString()), Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    NfcRestart.Step.ENABLE_NFC -> {
-                                        Toast.makeText(context, context.getString(R.string.toast_nfc_service_refreshed), Toast.LENGTH_SHORT).show()
-                                    }
-                                    NfcRestart.Step.CLEAR_CACHE -> {
-                                        Toast.makeText(context, context.getString(R.string.toast_nfc_restarting), Toast.LENGTH_SHORT).show()
-                                    }
-                                    NfcRestart.Step.DONE -> {
-                                        if (newPid != null && newPid != oldPid && oldPid != null) {
-                                            Toast.makeText(context, context.getString(R.string.toast_nfc_pid_restarted, newPid.toString()), Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    else -> {}
-                                }
-                            }
+                        // The session ends before the service goes away, not alongside it.
+                        EmulationController.deactivate(context)
+                        Toast.makeText(context, context.getString(R.string.toast_nfc_restarting), Toast.LENGTH_SHORT).show()
+                        val result = NfcRestart.restart(context)
+                        NfcRestart.messages(context, result).forEach {
+                            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
                         }
 
                         // Restarting the app is only needed when dropping the
                         // binder caches did not restore the proxy; asking every
                         // time made an in-process rebind look impossible.
-                        if (!result.proxyReachable) {
+                        if (result.before != NfcRestart.Lookup.Unavailable && !result.proxyReachable) {
                             showNfcRestartCompleteDialog = true
                         }
                     }
@@ -750,11 +736,6 @@ private fun UpdateSection(
     // Resolved here (composition scope) so the coroutine below can read it.
     val errorMessages = updateErrorMessages()
 
-    // Live download state published by UpdateDownloadService.
-    val downloadState by UpdateDownloadService.state.collectAsState()
-    // Remembered so "retry" can rebuild the same request after a failure.
-    var lastDownload by remember { mutableStateOf<Triple<String, String, String>?>(null) }
-
     val customBase by dataStore.updateCustomBase.collectAsState(initial = "")
     val githubBase by dataStore.updateGithubBase.collectAsState(initial = "https://raw.githubusercontent.com/Ra1nify/KonamikU/info/update.json")
     val mirrorBase by dataStore.updateMirrorBase.collectAsState(initial = "https://gh-proxy.com/")
@@ -779,86 +760,6 @@ private fun UpdateSection(
         UpdateInterval.DAY_3  to stringResource(R.string.setting_update_interval_3d),
         UpdateInterval.DAY_7  to stringResource(R.string.setting_update_interval_7d),
     )
-
-    // Download progress: shown while the foreground service transfers.
-    if (downloadState.phase == UpdateDownloadService.Phase.DOWNLOADING) {
-        AlertDialog(
-            onDismissRequest = { },
-            title = { Text(stringResource(R.string.update_title)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.update_downloading, downloadState.percent))
-                    Spacer(Modifier.height(12.dp))
-                    LinearProgressIndicator(
-                        progress = { downloadState.percent / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { UpdateDownloadService.cancel(context) }) {
-                    Text(stringResource(R.string.update_cancel))
-                }
-            }
-        )
-    } else if (downloadState.phase == UpdateDownloadService.Phase.INSTALLING) {
-        AlertDialog(
-            onDismissRequest = { },
-            title = { Text(stringResource(R.string.update_title)) },
-            text = { Text(stringResource(R.string.update_installing)) },
-            confirmButton = {
-                TextButton(onClick = { UpdateDownloadService.cancel(context) }) {
-                    Text(stringResource(R.string.update_cancel))
-                }
-            }
-        )
-    }
-
-    // Failure: let the user retry, dismiss, or fall back to a browser.
-    if (downloadState.phase == UpdateDownloadService.Phase.FAILED) {
-        AlertDialog(
-            onDismissRequest = { UpdateDownloadService.consumeFailure() },
-            title = { Text(stringResource(R.string.update_install_failed)) },
-            text = { Text(downloadState.message ?: stringResource(R.string.update_install_failed_desc)) },
-            confirmButton = {
-                // Retry needs the request that failed. It is only null when the
-                // failure was raised by a service run this screen did not start
-                // (e.g. after a process restart); offering an inert button was
-                // worse than not offering one.
-                TextButton(
-                    enabled = lastDownload != null,
-                    onClick = {
-                        val req = lastDownload ?: return@TextButton
-                        UpdateDownloadService.consumeFailure()
-                        UpdateDownloadService.start(context, req.first, req.second, req.third)
-                    }
-                ) { Text(stringResource(R.string.update_retry)) }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        // Only meaningful when the manifest recorded a URL.
-                        enabled = !downloadState.sourceUrl.isNullOrBlank(),
-                        onClick = {
-                            val url = downloadState.sourceUrl
-                            UpdateDownloadService.consumeFailure()
-                            if (!url.isNullOrBlank()) {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }
-                            }
-                        }
-                    ) { Text(stringResource(R.string.update_open_browser)) }
-                    TextButton(onClick = { UpdateDownloadService.consumeFailure() }) {
-                        Text(stringResource(R.string.update_dismiss))
-                    }
-                }
-            }
-        )
-    }
 
     // Changelog paging state
     var currentChangelog by remember { mutableStateOf<Changelog?>(null) }
@@ -983,19 +884,16 @@ private fun UpdateSection(
                                     showResultDialog = false
                                     scope.launch {
                                         val endpoints = UpdateManager.resolveEndpoints(dataStore)
-                                        if (!UpdateInstaller.canInstall(context)) {
-                                            // Bounce the user to system settings to grant installs.
-                                            UpdateInstaller.requestInstallPermission(context)
-                                            return@launch
-                                        }
-                                        val mirrored = endpoints.resolveDownloadUrl(resultUrl)
-                                        val direct   = endpoints.directDownloadUrl(resultUrl)
-                                        lastDownload = Triple(mirrored, direct, resultMsg)
+                                        // The service checks the install
+                                        // permission itself, so a denial leaves
+                                        // a retry entry instead of a dead end.
                                         UpdateDownloadService.start(
-                                            context = context,
-                                            url = mirrored,
-                                            fallbackUrl = direct,
-                                            version = resultMsg
+                                            context,
+                                            UpdateTask.Request(
+                                                url = endpoints.resolveDownloadUrl(resultUrl),
+                                                fallbackUrl = endpoints.directDownloadUrl(resultUrl),
+                                                version = resultMsg
+                                            )
                                         )
                                     }
                                 }) { Text(stringResource(R.string.setting_update_download)) }
@@ -1427,34 +1325,29 @@ private fun PmmItem(pmmEnabled: Boolean, onToggle: (Boolean) -> Unit) {
     }
 }
 
+/**
+ * Formerly "background emulation". HCE-F only routes while the app is in the
+ * foreground, so the setting now only decides whether an active card shows a
+ * notification.
+ */
 @Composable
-private fun BackgroundEmuItem(backgroundEmu: Boolean, onToggle: (Boolean) -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.AccountBalanceWallet,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.setting_background_emu), style = MaterialTheme.typography.bodyLarge)
-                Text(stringResource(R.string.setting_background_emu_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-            }
-            Switch(checked = backgroundEmu, onCheckedChange = onToggle)
+private fun ActiveNotificationItem(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Notifications,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp)
+        )
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.setting_active_notification), style = MaterialTheme.typography.bodyLarge)
+            Text(stringResource(R.string.setting_active_notification_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
-        if (backgroundEmu) {
-            Text(
-                stringResource(R.string.setting_background_emu_warn),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 30.dp, top = 4.dp)
-            )
-        }
+        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 

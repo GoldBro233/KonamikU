@@ -34,8 +34,6 @@
     <string name="notif_channel_desc">KonamikU NFC 카드 에뮬레이션 상태</string>
     <string name="notif_progress_simulated">시뮬레이션됨</string>
     <string name="notif_action_stop">중지</string>
-    <string name="notif_action_switch_mode">모드 전환</string>
-    <string name="notif_action_next_card">다음 카드</string>
 
     <string name="status_nfc_rf">NFC 무선</string>
     <string name="status_lsposed">LSPosed</string>
@@ -179,9 +177,7 @@
     <string name="dialog_nfc_restart_desc">root로 NFC 서비스를 재시작할까요?\n\ncom.android.nfc를 종료하고 다시 시작합니다.</string>
     <string name="dialog_xposed_refresh_title">LSPosed 새로고침</string>
     <string name="dialog_xposed_refresh_desc">LSPosed 모듈 상태를 다시 확인할까요?</string>
-    <string name="toast_nfc_pid_killed">com.android.nfc pid %s 종료됨</string>
     <string name="toast_nfc_restarting">com.android.nfc 재시작 중</string>
-    <string name="toast_nfc_pid_restarted">com.android.nfc pid %s 재시작됨</string>
     <string name="toast_nfc_service_refreshed">NFC 새로고침됨</string>
 
     <string name="restart_app_dialog_msg">NFC 서비스가 다시 시작되었지만 이 앱에서 연결할 수 없습니다.</string>
@@ -193,7 +189,52 @@
 
     <string name="setting_pmm_restart_msg">변경 사항을 적용하려면 NFC 서비스를 다시 시작하시겠습니까?</string>
 
-    <string name="setting_background_emu">백그라운드 에뮬레이션</string>
-    <string name="setting_background_emu_desc">백그라운드나 잠금 화면에서도 카드 에뮬레이션을 계속합니다. 끄면 앱이 실행 중일 때만 시뮬레이션합니다.</string>
-    <string name="setting_background_emu_warn">다른 NFC 앱과 서비스 충돌이 발생할 수 있습니다. 잠금 화면 에뮬레이션이 필요한 경우에만 켜십시오.</string>
+    <string name="setting_active_notification">활성화 중 알림 표시</string>
+    <string name="setting_active_notification_desc">카드가 활성화된 동안 알림을 표시합니다. 에뮬레이션은 KonamikU가 전면에 있을 때만 작동합니다.</string>
+
+    <string name="notif_channel_update">앱 업데이트</string>
+    <string name="notif_channel_update_download">업데이트 다운로드</string>
+    <string name="setting_update_err_blocked">업데이트 소스가 요청을 거부했습니다(요청 제한). 잠시 후 다시 시도하거나 업데이트 소스를 바꾸세요.</string>
+    <string name="setting_update_err_invalid">업데이트 정보 형식이 잘못되었습니다. 서버 측 문제이니 신고해 주세요.</string>
+    <string name="setting_update_err_network">네트워크에 연결할 수 없습니다. 연결을 확인하거나 설정에서 업데이트 소스를 바꾸세요.</string>
+    <string name="setting_update_err_not_found">업데이트 정보를 찾을 수 없습니다. 서버에 아직 게시되지 않았습니다.</string>
+    <string name="setting_update_err_nourl">업데이트 URL이 설정되지 않았습니다.</string>
+    <string name="status_pmm_installed">주입됨</string>
+    <string name="status_pmm_waiting">NFC 스택 대기 중</string>
+    <string name="status_pmm_waiting_hint">카드를 한 번 대면 설정이 완료됩니다.</string>
+    <string name="status_pmm_no_symbol">심볼을 찾을 수 없음</string>
+    <string name="status_pmm_no_symbol_hint">이 기기의 NFC 스택은 대상 심볼을 내보내지 않으므로 여기에 후크를 설치할 수 없습니다.</string>
+    <string name="status_pmm_hook_failed">후크 거부됨</string>
+    <string name="status_pmm_hook_failed_hint">심볼은 찾았지만 패치가 거부되었습니다. ROM 업데이트로 함수가 바뀌었을 수 있습니다.</string>
+    <string name="status_pmm_idle">로드되지 않음</string>
+    <string name="status_pmm_idle_hint">설정에서 비활성화되었습니다.</string>
+    <string name="update_title">KonamikU 업데이트</string>
+    <string name="update_downloading">다운로드 중… %1$d%%</string>
+    <string name="update_downloading_retry">미러를 사용할 수 없어 직접 다시 시도하는 중… %1$d%%</string>
+    <string name="update_downloading_unknown">다운로드 중…</string>
+    <string name="update_downloading_retry_unknown">미러를 사용할 수 없어 직접 다시 시도하는 중…</string>
+    <string name="update_installing">설치 중…</string>
+    <string name="update_cancel">취소</string>
+    <string name="update_hide">숨기기</string>
+    <string name="update_retry">다시 시도</string>
+    <string name="update_open_browser">브라우저에서 열기</string>
+    <string name="update_dismiss">닫기</string>
+    <string name="update_confirm_title">업데이트 확인</string>
+    <string name="update_confirm_desc">KonamikU %1$s 다운로드가 완료되었습니다. 계속하여 설치를 확인하세요.</string>
+    <string name="update_continue_install">계속</string>
+    <string name="update_install_failed">업데이트 실패</string>
+    <string name="update_install_failed_desc">패키지를 설치할 수 없습니다.</string>
+    <string name="update_err_timeout">다운로드가 30초 동안 진행되지 않았습니다. 업데이트 소스를 바꾸거나 브라우저에서 페이지를 여세요.</string>
+    <string name="update_err_download">다운로드에 실패했습니다. 네트워크를 확인하거나 업데이트 소스를 바꾸세요.</string>
+    <string name="update_err_permission">KonamikU의 알 수 없는 앱 설치를 허용한 뒤 다시 시도하세요.</string>
+    <string name="update_err_install">시스템이 설치를 거부했습니다.</string>
+    <string name="update_err_aborted">설치가 취소되었습니다.</string>
+    <string name="update_err_interrupted">업데이트가 완료되기 전에 중단되었습니다. 다시 시도하세요.</string>
+
+    <string name="toast_nfc_restart_ambiguous">com.android.nfc 프로세스가 여러 개 있습니다(%1$s). 아무것도 중지하지 않았습니다</string>
+    <string name="toast_nfc_restart_unconfirmed">com.android.nfc(pid:%1$s)에 중지 신호를 보냈지만 새 프로세스는 확인되지 않았습니다</string>
+    <string name="emu_err_no_activity">카드를 활성화하려면 KonamikU를 열어 두세요. 에뮬레이션은 앱이 전면에 있을 때만 작동합니다.</string>
+    <string name="emu_err_nfc_unavailable">NFC를 사용할 수 없습니다. NFC를 켜고 다시 시도하세요.</string>
+    <string name="emu_err_rejected">NFC 서비스가 이 카드의 IDm 또는 시스템 코드를 거부했습니다.</string>
+    <string name="emu_err_enable_failed">NFC 서비스가 이 앱의 에뮬레이션을 활성화하지 않았습니다.</string>
 </resources>

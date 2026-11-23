@@ -43,16 +43,12 @@ class KonamikuApp : Application(), XposedServiceHelper.OnServiceListener {
 
         // A process restart is not a normal lifecycle event - it means the app
         // was killed, crashed, or updated. Runtime state does not survive that:
-        // the HCE-F routing the previous process registered is gone with it, so
-        // keeping `activeCardId` would show a card as active while nothing is
-        // registered, and the reader would silently time out.
-        //
-        // Every runtime-only value is therefore reset here rather than resumed:
-        // the active card, the Xposed activation snapshot, and the scheduled
-        // update check are all re-derived from persisted configuration.
+        // the Xposed activation snapshot is reset here and re-derived, and the
+        // emulation session lives only in memory (EmulationController), so a
+        // new process starts with no card routed rather than one that looks
+        // active while nothing is registered.
         XposedState.reset()
         appScope.launch {
-            dataStore.saveActiveCardId(null)
             val interval = dataStore.updateInterval.first()
             UpdateManager.schedule(this@KonamikuApp, interval)
         }

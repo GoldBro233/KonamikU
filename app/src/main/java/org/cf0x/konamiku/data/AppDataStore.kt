@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.materialkolor.PaletteStyle
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.cf0x.konamiku.R
 
@@ -74,9 +75,9 @@ class AppDataStore(private val context: Context) {
         val THEME_MODE         = stringPreferencesKey("theme_mode")
         val COLOR_SOURCE       = stringPreferencesKey("color_source")
         val PRESET_COLOR       = intPreferencesKey("preset_color")
-        val ACTIVE_CARD_ID     = stringPreferencesKey("active_card_id")
-        val EMU_MODE           = stringPreferencesKey("emu_mode")
         val APP_LOCALE         = stringPreferencesKey("app_locale")
+        /** API 33+: set once the stored choice was handed to LocaleManager. */
+        val LOCALE_MIGRATED    = booleanPreferencesKey("locale_migrated_to_system")
         val DEV_FORCE_EMU      = booleanPreferencesKey("dev_mode_force_emu")
         val PMM_ENABLED        = booleanPreferencesKey("pmm_enabled")
         val THEME_EXPRESSIVE   = booleanPreferencesKey("theme_expressive")
@@ -88,7 +89,12 @@ class AppDataStore(private val context: Context) {
         val UPDATE_LAST_CHECK  = longPreferencesKey("update_last_check")
         val UPDATE_INTERVAL    = stringPreferencesKey("update_interval")
         val UPDATE_MODE        = stringPreferencesKey("update_mode")
-        val BACKGROUND_EMU     = booleanPreferencesKey("background_emu")
+        /**
+         * Was "background emulation". HCE-F is foreground-only on the public
+         * platform, so the value now only decides whether an active card
+         * shows a notification; the key is kept so the choice carries over.
+         */
+        val ACTIVE_NOTIFICATION = booleanPreferencesKey("background_emu")
     }
 
     val navigationMode: Flow<NavigationMode> = context.dataStore.data.map { p ->
@@ -113,18 +119,25 @@ class AppDataStore(private val context: Context) {
         Color(p[Keys.PRESET_COLOR] ?: 0xFF6750A4.toInt())
     }
 
-    val activeCardId: Flow<String?> = context.dataStore.data.map { it[Keys.ACTIVE_CARD_ID] }
+    val appLocale: Flow<AppLocale> = context.dataStore.data.map { resolveLocale(it[Keys.APP_LOCALE]) }
 
-    val emuMode: Flow<EmuMode> = context.dataStore.data.map { p ->
-        runCatching { EmuMode.valueOf(p[Keys.EMU_MODE] ?: "") }
-            .getOrDefault(EmuMode.NORMAL)
-            .also { if (it == EmuMode.NORMAL && p[Keys.EMU_MODE] != null && p[Keys.EMU_MODE] != EmuMode.NORMAL.name) Log.w("AppDataStore", "Unknown EMU_MODE: ${p[Keys.EMU_MODE]}") }
+    /** The stored language choice and whether it was migrated to LocaleManager (API 33+). */
+    data class LocaleSnapshot(val locale: AppLocale, val migrated: Boolean)
+
+    suspend fun appLocaleSnapshot(): LocaleSnapshot = context.dataStore.data.first().let {
+        LocaleSnapshot(resolveLocale(it[Keys.APP_LOCALE]), it[Keys.LOCALE_MIGRATED] ?: false)
     }
 
-    val appLocale: Flow<AppLocale> = context.dataStore.data.map { p ->
-        val tag = p[Keys.APP_LOCALE] ?: ""
-        AppLocale.entries.find { it.tag == tag } ?: detectSystemLocale()
-    }
+    suspend fun markLocaleMigrated() = context.dataStore.edit { it[Keys.LOCALE_MIGRATED] = true }
+
+    /**
+     * Never set (or set to "") is [AppLocale.SYSTEM]. A tag this build does
+     * not know - written by an older build that offered other languages -
+     * resolves to the offered language closest to the device language, which
+     * is what such a user saw before rather than a silent switch to English.
+     */
+    private fun resolveLocale(tag: String?): AppLocale =
+        AppLocale.entries.find { it.tag == (tag ?: "") } ?: detectSystemLocale()
 
     private fun detectSystemLocale(): AppLocale {
         val locale = java.util.Locale.getDefault()
@@ -163,18 +176,13 @@ class AppDataStore(private val context: Context) {
             .also { if (it == UpdateMode.GITHUB && p[Keys.UPDATE_MODE] != null && p[Keys.UPDATE_MODE] != UpdateMode.GITHUB.name) Log.w("AppDataStore", "Unknown UPDATE_MODE: ${p[Keys.UPDATE_MODE]}") }
     }
 
-    val backgroundEmulation: Flow<Boolean> = context.dataStore.data.map { it[Keys.BACKGROUND_EMU] ?: false }
+    val activeNotification: Flow<Boolean> = context.dataStore.data.map { it[Keys.ACTIVE_NOTIFICATION] ?: false }
 
     suspend fun saveNavigationMode(m: NavigationMode) = context.dataStore.edit { it[Keys.NAV_MODE] = m.name }
     suspend fun saveThemeMode(m: ThemeMode) = context.dataStore.edit { it[Keys.THEME_MODE] = m.name }
     suspend fun saveColorSource(s: ColorSource) = context.dataStore.edit { it[Keys.COLOR_SOURCE] = s.name }
     suspend fun savePresetColor(c: Int) = context.dataStore.edit { it[Keys.PRESET_COLOR] = c }
 
-    suspend fun saveActiveCardId(id: String?) = context.dataStore.edit { p ->
-        if (id == null) p.remove(Keys.ACTIVE_CARD_ID) else p[Keys.ACTIVE_CARD_ID] = id
-    }
-
-    suspend fun saveEmuMode(m: EmuMode) = context.dataStore.edit { it[Keys.EMU_MODE] = m.name }
     suspend fun saveAppLocale(l: AppLocale) = context.dataStore.edit { it[Keys.APP_LOCALE] = l.tag }
 
     val pmmEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.PMM_ENABLED] ?: true }
@@ -195,6 +203,6 @@ class AppDataStore(private val context: Context) {
     suspend fun saveUpdateInterval(v: UpdateInterval) = context.dataStore.edit { it[Keys.UPDATE_INTERVAL] = v.name }
     suspend fun saveUpdateMode(v: UpdateMode) = context.dataStore.edit { it[Keys.UPDATE_MODE] = v.name }
 
-    suspend fun saveBackgroundEmulation(v: Boolean) =
-        context.dataStore.edit { it[Keys.BACKGROUND_EMU] = v }
+    suspend fun saveActiveNotification(v: Boolean) =
+        context.dataStore.edit { it[Keys.ACTIVE_NOTIFICATION] = v }
 }

@@ -36,8 +36,6 @@
     <string name="notif_channel_desc">KonamikU NFC card emulation status</string>
     <string name="notif_progress_simulated">Simulated</string>
     <string name="notif_action_stop">Stop</string>
-    <string name="notif_action_switch_mode">Switch Mode</string>
-    <string name="notif_action_next_card">Next Card</string>
 
     <string name="status_nfc_rf">NFC Radio</string>
     <string name="status_lsposed">LSPosed</string>
@@ -88,9 +86,8 @@
     <string name="setting_nfc_default_desc">Manage which app handles standard NFC payments.</string>
     <string name="status_xposed_needs_restart">Module active — restart NFC process to apply.</string>
 
-    <string name="setting_background_emu">Background Emulation</string>
-    <string name="setting_background_emu_desc">Keep simulating when app is in background or screen is off. Disable to simulate only while the app is open.</string>
-    <string name="setting_background_emu_warn">May cause NFC service conflicts with other apps. Only enable if you need lock-screen emulation.</string>
+    <string name="setting_active_notification">Notification while active</string>
+    <string name="setting_active_notification_desc">Show a notification while a card is active. Emulation only runs while KonamikU is in the foreground.</string>
 
     <string name="setting_language_system_managed">Managed by system settings</string>
     <string name="setting_language">App Language</string>
@@ -185,12 +182,22 @@
     <string name="update_cancel">Cancel</string>
     <string name="update_retry">Retry</string>
     <string name="update_open_browser">Open in browser</string>
-    <string name="update_dismiss">Dismiss</string>    <string name="update_install_failed">Update failed</string>
+    <string name="update_dismiss">Dismiss</string>
+    <string name="update_install_failed">Update failed</string>
     <string name="update_install_failed_desc">The package could not be installed.</string>
-        <string name="update_err_timeout">Download stalled for 30 seconds. Switch the update source, or open the page in a browser.</string>
-<string name="update_err_download">Download failed. Check your network or switch the update source.</string>
+    <string name="update_err_timeout">Download stalled for 30 seconds. Switch the update source, or open the page in a browser.</string>
+    <string name="update_err_download">Download failed. Check your network or switch the update source.</string>
     <string name="update_err_permission">Allow KonamikU to install unknown apps, then try again.</string>
     <string name="update_err_install">Installation was rejected by the system.</string>
+    <string name="update_err_aborted">Installation was cancelled.</string>
+    <string name="update_err_interrupted">The update stopped before it finished. Try again.</string>
+    <string name="update_downloading_unknown">Downloading…</string>
+    <string name="update_downloading_retry_unknown">Mirror unavailable, retrying direct…</string>
+    <string name="update_hide">Hide</string>
+    <string name="update_confirm_title">Confirm update</string>
+    <string name="update_confirm_desc">KonamikU %1$s is downloaded. Continue to confirm the installation.</string>
+    <string name="update_continue_install">Continue</string>
+    <string name="notif_channel_update_download">Update downloads</string>
     <string name="notif_channel_update">App updates</string>
     <string name="setting_update_interval_off">Off</string>
     <string name="setting_update_interval_30min">30 minutes</string>
@@ -221,10 +228,15 @@
     <string name="dialog_nfc_restart_desc">Restart NFC service via root?\n\nThis will kill and restart com.android.nfc.</string>
     <string name="dialog_xposed_refresh_title">Refresh LSPosed</string>
     <string name="dialog_xposed_refresh_desc">Re-check LSPosed module status?</string>
-    <string name="toast_nfc_pid_killed">com.android.nfc pid %s killed</string>
     <string name="toast_nfc_restarting">com.android.nfc restarting</string>
-    <string name="toast_nfc_pid_restarted">com.android.nfc pid %s restarted</string>
     <string name="toast_nfc_service_refreshed">nfc refreshed</string>
+    <string name="toast_nfc_restart_ambiguous">Several com.android.nfc processes (%1$s); none was stopped</string>
+    <string name="toast_nfc_restart_unconfirmed">Stop sent to com.android.nfc (pid:%1$s), but no new process was seen</string>
+
+    <string name="emu_err_no_activity">Keep KonamikU open to activate a card: emulation only works while the app is in front.</string>
+    <string name="emu_err_nfc_unavailable">NFC is unavailable. Turn NFC on and try again.</string>
+    <string name="emu_err_rejected">The NFC service rejected this card\'s IDm or system code.</string>
+    <string name="emu_err_enable_failed">The NFC service did not enable emulation for this app.</string>
 
     <string name="restart_app_dialog_msg">The NFC service was restarted, but this app can no longer reach it.</string>
     <string name="restart_app_dialog_confirm">Restart App</string>

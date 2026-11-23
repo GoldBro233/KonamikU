@@ -6,168 +6,175 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.cf0x.konamiku.R
+import java.util.concurrent.TimeUnit
 
 object NfcRestart {
 
     private const val TAG = "KonamikU-NfcRestart"
+    private const val PROCESS = "com.android.nfc"
+    private const val ROOT_TIMEOUT_S = 10L
 
-    sealed class Result {
-        /**
-         * Whether the HCE-F proxy answered a probe after the caches were
-         * dropped. False means the restart finished but this process still
-         * cannot reach the service, which is the one case that genuinely needs
-         * an app restart.
-         */
-        abstract val proxyReachable: Boolean
-
-        /** com.android.nfc was already dead before pkill */
-        data class WasDead(
-            val newPid: Int?,
-            override val proxyReachable: Boolean = false
-        ) : Result()
-
-        /** pkill ran but PID didn't change — kill failed */
-        data class KillFailed(
-            val pid: Int,
-            override val proxyReachable: Boolean = false
-        ) : Result()
-
-        /** pkill succeeded; system may need to restart NFC */
-        data class Killed(
-            val oldPid: Int,
-            val newPid: Int?,
-            override val proxyReachable: Boolean = false
-        ) : Result()
-
-        /** NFC restarted cleanly — new PID differs from old */
-        data class Restarted(
-            val oldPid: Int,
-            val newPid: Int,
-            override val proxyReachable: Boolean = false
-        ) : Result()
+    /** What a by-name lookup of [PROCESS] found. */
+    sealed interface Lookup {
+        /** No root shell, or the lookup itself failed. */
+        data object Unavailable : Lookup
+        data object None : Lookup
+        data class Single(val pid: Int) : Lookup
+        /** Never signalled: there is no telling which one is the service. */
+        data class Multiple(val pids: List<Int>) : Lookup
     }
 
-    /** Steps emitted by [restart] so callers can show progress toasts.
-     *  Each step is followed by a 500 ms delay before the next operation. */
-    enum class Step {
-        /** Initial PID captured (or null if not running). */
-        CAPTURE_PID,
-        /** pkill sent to com.android.nfc. */
-        KILL_PROCESS,
-        /** svc nfc disable completed. */
-        DISABLE_NFC,
-        /** svc nfc enable completed. */
-        ENABLE_NFC,
-        /** Binder caches cleared. */
-        CLEAR_CACHE,
-        /** NFC adapter reported enabled. */
-        NFC_READY,
-        /** New PID captured after restart. */
-        CHECK_PID,
-        /** Entire sequence finished — [Result] is the return value. */
-        DONE
+    enum class Signal {
+        /** No unique target, so nothing was signalled. */
+        NOT_SENT,
+        /** The target still was [PROCESS] and kill succeeded: termination requested. */
+        SENT,
+        /** The pid no longer belonged to [PROCESS] by the time it was checked. */
+        TARGET_CHANGED,
+        FAILED
     }
-
-    /** Gets the PID of com.android.nfc via root. Returns null if not running. */
-    fun getPid(): Int? = runCatching {
-        val proc = Runtime.getRuntime()
-            .exec(arrayOf("su", "-c", "pgrep -f com.android.nfc"))
-        val out = proc.inputStream.bufferedReader().readText().trim()
-        proc.waitFor()
-        out.lines().firstOrNull { it.isNotBlank() }?.trim()?.toIntOrNull()
-    }.getOrNull()
 
     /**
-     * Unified NFC restart sequence — the single public method for all NFC
-     * restart needs.
-     *
-     * Steps (each followed by 500 ms delay):
-     * 1. Capture old PID           → [Step.CAPTURE_PID]
-     * 2. pkill com.android.nfc     → [Step.KILL_PROCESS]
-     * 3. svc nfc disable           → [Step.DISABLE_NFC]
-     * 4. svc nfc enable            → [Step.ENABLE_NFC]
-     * 5. Clear binder caches       → [Step.CLEAR_CACHE]
-     * 6. Wait for NFC ready        → [Step.NFC_READY]
-     * 7. Capture new PID           → [Step.CHECK_PID]
-     * 8. Return [Result]           → [Step.DONE]
-     *
-     * @param context  Application context for NfcAdapter lookup.
-     * @param onStep   Suspend callback invoked after each step; the 500 ms
-     *                 delay runs **after** this callback returns, so callers
-     *                 can emit a toast (or perform other UI) before the
-     *                 next operation begins.
-     * @return [Result] describing the outcome.
+     * What was observed, step by step. "Termination requested", "a new
+     * process replaced the old one" and "the service is usable" are separate
+     * facts; callers report only what is true here.
      */
-    suspend fun restart(
-        context: Context,
-        onStep: suspend (step: Step, oldPid: Int?, newPid: Int?) -> Unit = { _, _, _ -> }
-    ): Result = withContext(Dispatchers.IO) {
-        // 1. Capture old PID
-        val oldPid = getPid()
-        onStep(Step.CAPTURE_PID, oldPid, null)
-        delay(500)
+    data class Result(
+        val before: Lookup,
+        val signal: Signal,
+        val after: Lookup,
+        val nfcEnabled: Boolean,
+        /**
+         * Whether the HCE-F proxy answered a probe after the caches were
+         * dropped. False means this process still cannot reach the service,
+         * the one case that genuinely needs an app restart.
+         */
+        val proxyReachable: Boolean
+    ) {
+        val oldPid: Int? get() = (before as? Lookup.Single)?.pid
+        val newPid: Int? get() = (after as? Lookup.Single)?.pid
 
-        // 2. Kill the NFC process
-        runCatching {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "pkill -f com.android.nfc")).waitFor()
-        }
-        onStep(Step.KILL_PROCESS, oldPid, null)
-        delay(500)
-
-        // 3. Disable NFC
-        runCatching {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "svc nfc disable")).waitFor()
-        }
-        onStep(Step.DISABLE_NFC, oldPid, null)
-        delay(500)
-
-        // 4. Enable NFC
-        runCatching {
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "svc nfc enable")).waitFor()
-        }
-        onStep(Step.ENABLE_NFC, oldPid, null)
-        delay(500)
-
-        // 5. Drop the binder caches our process still holds from the old NFC
-        //    service. The wait loop below needs a working adapter, and every
-        //    card-emulation call goes through the static proxies cleared here.
-        clearNfcFCache()
-        onStep(Step.CLEAR_CACHE, oldPid, null)
-        delay(500)
-
-        // 6. Wait for NFC service to be ready
-        var retry = 0
-        while (retry < 15) {
-            val adapter = runCatching { NfcAdapter.getDefaultAdapter(context) }.getOrNull()
-            if (adapter?.isEnabled == true) break
-            delay(500)
-            retry++
-        }
-        onStep(Step.NFC_READY, oldPid, null)
-        delay(500)
-
-        // 7. Probe the HCE-F proxy once. Clearing dropped a proxy that would
-        //    otherwise stay dead; this distinguishes "the restart looked
-        //    finished" from "the app can talk to the service again". One retry
-        //    covers the case where the first call lands while the rebind is
-        //    still in flight.
-        val proxyOk = canReachNfcFService(context) || canReachNfcFService(context)
-        Log.i(TAG, "HCE-F proxy reachable after restart: $proxyOk")
-
-        // 7. Capture new PID
-        val newPid = getPid()
-        onStep(Step.CHECK_PID, oldPid, newPid)
-
-        // 8. Build and return result
-        val result = when {
-            oldPid == null                     -> Result.WasDead(newPid, proxyOk)
-            newPid != null && newPid == oldPid -> Result.KillFailed(oldPid, proxyOk)
-            newPid == null                     -> Result.Killed(oldPid, null, proxyOk)
-            else                               -> Result.Restarted(oldPid, newPid, proxyOk)
-        }
-        onStep(Step.DONE, oldPid, newPid)
-        result
+        /** The signalled process is gone and exactly one other instance runs. */
+        val processReplaced: Boolean
+            get() = signal == Signal.SENT && oldPid != null && newPid != null && newPid != oldPid
     }
+
+    /** Looks [PROCESS] up by exact process name via root. */
+    fun lookup(): Lookup {
+        // The marker separates "pidof found nothing" (exit 1) from "su failed".
+        val out = runRoot("pidof $PROCESS; echo \"rc=\$?\"") ?: return Lookup.Unavailable
+        val lines = out.lines()
+        lines.firstOrNull { it.startsWith("rc=") } ?: return Lookup.Unavailable
+        val pids = lines.filterNot { it.startsWith("rc=") }
+            .flatMap { it.trim().split(Regex("\\s+")) }
+            .mapNotNull { it.toIntOrNull() }
+            .distinct()
+        return when (pids.size) {
+            0 -> Lookup.None
+            1 -> Lookup.Single(pids[0])
+            else -> Lookup.Multiple(pids)
+        }
+    }
+
+    /**
+     * Restarts the NFC service: signal the unique [PROCESS], toggle NFC,
+     * drop this process's binder caches, then observe what actually happened.
+     *
+     * @param context Application context for NfcAdapter lookup.
+     */
+    suspend fun restart(context: Context): Result = withContext(Dispatchers.IO) {
+        val before = lookup()
+        Log.i(TAG, "Before restart: $before")
+        if (before == Lookup.Unavailable) {
+            return@withContext Result(before, Signal.NOT_SENT, before, isNfcEnabled(context), false)
+        }
+
+        // Signal only a single, re-verified target: a guessed pid can belong
+        // to the shell that ran the lookup, or to whatever reused the number.
+        val signal = (before as? Lookup.Single)?.let { signalIfStillTarget(it.pid) } ?: Signal.NOT_SENT
+        Log.i(TAG, "Signal: $signal")
+        delay(500)
+
+        runRoot("svc nfc disable")
+        delay(500)
+        runRoot("svc nfc enable")
+        delay(500)
+
+        // The wait below needs a working adapter, and every card-emulation
+        // call goes through the static proxies dropped here.
+        clearNfcFCache()
+
+        var enabled = isNfcEnabled(context)
+        var waits = 0
+        while (!enabled && waits++ < 15) {
+            delay(500)
+            enabled = isNfcEnabled(context)
+        }
+
+        // Rebinding is lazy; one retry covers a first call that lands while
+        // the rebind is still in flight.
+        val proxyOk = canReachNfcFService(context) || canReachNfcFService(context)
+        val after = lookup()
+        Result(before, signal, after, enabled, proxyOk).also { Log.i(TAG, "Restart result: $it") }
+    }
+
+    /**
+     * Toasts describing [result], derived from observations only: a sent
+     * signal is not reported as a restart unless a new process was seen.
+     */
+    fun messages(context: Context, result: Result): List<String> = buildList {
+        when (val before = result.before) {
+            Lookup.Unavailable -> add(context.getString(R.string.toast_root_no_permission))
+            Lookup.None -> add(context.getString(R.string.toast_nfc_was_dead))
+            is Lookup.Multiple ->
+                add(context.getString(R.string.toast_nfc_restart_ambiguous, before.pids.joinToString()))
+            is Lookup.Single -> add(
+                when {
+                    result.processReplaced -> context.getString(
+                        R.string.toast_nfc_restarted, before.pid.toString(), result.newPid.toString()
+                    )
+                    result.signal == Signal.SENT ->
+                        context.getString(R.string.toast_nfc_restart_unconfirmed, before.pid.toString())
+                    else -> context.getString(R.string.toast_nfc_restart_failed, before.pid.toString())
+                }
+            )
+        }
+        if (result.nfcEnabled && result.proxyReachable) {
+            add(context.getString(R.string.toast_nfc_service_refreshed))
+        }
+    }
+
+    private fun signalIfStillTarget(pid: Int): Signal {
+        // App processes carry their name in argv[0] with the rest zeroed, so
+        // the substitution (which drops NULs) equals the bare name only for
+        // the real service.
+        val script = "c=\$(cat /proc/$pid/cmdline 2>/dev/null); " +
+            "if [ \"\$c\" != \"$PROCESS\" ]; then echo changed; " +
+            "elif kill $pid; then echo sent; else echo failed; fi"
+        val out = runRoot(script) ?: return Signal.FAILED
+        return when (out.trim().lines().lastOrNull()?.trim()) {
+            "sent" -> Signal.SENT
+            "changed" -> Signal.TARGET_CHANGED
+            else -> Signal.FAILED
+        }
+    }
+
+    /** Runs [command] as root; stdout when it exited 0, else null. */
+    private fun runRoot(command: String): String? = runCatching {
+        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+        try {
+            proc.outputStream.close()
+            val out = proc.inputStream.bufferedReader().readText()
+            if (!proc.waitFor(ROOT_TIMEOUT_S, TimeUnit.SECONDS)) return@runCatching null
+            out.takeIf { proc.exitValue() == 0 }
+        } finally {
+            proc.destroy()
+        }
+    }.onFailure { Log.w(TAG, "Root command failed: ${it.message}") }.getOrNull()
+
+    private fun isNfcEnabled(context: Context): Boolean =
+        runCatching { NfcAdapter.getDefaultAdapter(context)?.isEnabled == true }.getOrDefault(false)
 
     /**
      * Drops the binder caches that survive a NFC process restart.

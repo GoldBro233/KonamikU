@@ -50,6 +50,7 @@ import org.cf0x.konamiku.ui.screens.MainScreen
 import org.cf0x.konamiku.ui.screens.SettingScreen
 import org.cf0x.konamiku.ui.screens.SetupScreen
 import org.cf0x.konamiku.ui.screens.ToolsScreen
+import org.cf0x.konamiku.ui.components.UpdateTaskDialogs
 import org.cf0x.konamiku.ui.viewmodels.StatusViewModel
 
 /** How long taps are swallowed while a screen transition plays. */
@@ -231,4 +232,6 @@ fun MainLayout(
             }
         }
     }
+
+    UpdateTaskDialogs()
 }

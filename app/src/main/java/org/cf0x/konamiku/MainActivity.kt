@@ -1,10 +1,8 @@
 package org.cf0x.konamiku
 
-import android.content.ComponentName
 import android.content.Intent
 import android.nfc.NfcAdapter
 import android.nfc.Tag
-import android.nfc.cardemulation.NfcFCardEmulation
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -16,22 +14,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.withResumed
 import com.materialkolor.PaletteStyle
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.cf0x.konamiku.data.AppDataStore
 import org.cf0x.konamiku.data.AppLocale
 import org.cf0x.konamiku.data.ColorSource
 import org.cf0x.konamiku.data.ThemeMode
-import org.cf0x.konamiku.notification.LiveUpdateManager
-import org.cf0x.konamiku.system.UpdateDownloadService
+import org.cf0x.konamiku.nfc.EmulationController
+import org.cf0x.konamiku.system.UpdateInstaller
+import org.cf0x.konamiku.system.UpdateTask
 import org.cf0x.konamiku.ui.layout.MainLayout
 import org.cf0x.konamiku.ui.theme.KonamikuTheme
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var dataStore: AppDataStore
-    private var nfcAdapter: NfcAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Installed before super.onCreate: it swaps in Theme.Konamiku via
@@ -47,7 +46,6 @@ class MainActivity : ComponentActivity() {
         window.decorView.post { firstFrameDrawn = true }
 
         dataStore    = AppDataStore(applicationContext)
-        nfcAdapter   = NfcAdapter.getDefaultAdapter(this)
 
         setContent {
             val themeMode       by dataStore.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
@@ -96,9 +94,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Update failures prefer the in-app dialog; the notification is only
-        // used as a fallback while no Activity is visible.
-        UpdateDownloadService.setUiVisible(true)
+        // Update outcomes prefer the in-app dialog; notifications are only
+        // used while no Activity is visible.
+        UpdateTask.uiVisible = true
+        // An install result may have arrived in a process that has since
+        // died, or never arrived; settle it from the system's own record.
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { UpdateInstaller.reconcile(applicationContext) }
+                .onFailure { android.util.Log.w("KonamikU", "Update reconcile failed: ${it.message}") }
+        }
+
+        // HCE-F only routes to a resumed Activity's preferred service; this
+        // Activity is that host. Re-confirms a session kept across a
+        // configuration change once the lifecycle reports RESUMED, which
+        // happens only after onResume returns.
+        EmulationController.attachHost(this)
+        lifecycleScope.launch {
+            lifecycle.withResumed { }
+            EmulationController.onHostResumed(applicationContext)
+        }
+
+        // API 33+: the system's per-app language is the truth, and it may
+        // have been changed or cleared in system Settings while we were away.
         if (Build.VERSION.SDK_INT >= 33) {
             runCatching {
                 val lm = getSystemService(android.app.LocaleManager::class.java) ?: return@runCatching
@@ -114,47 +131,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // Before super: the routing is torn down while this Activity is still
+        // the resumed host, so nothing answers once the app is not in front.
+        EmulationController.onHostPaused(this, isChangingConfigurations)
         super.onPause()
-        UpdateDownloadService.setUiVisible(false)
-
-        // A configuration change (rotation, most often: holding the phone
-        // flat over a reader flips it to landscape) recreates the Activity.
-        // That is not the user leaving the app, and stopping here deregistered
-        // the card ~300 ms into the first tap. The registration is held by the
-        // NFC service per uid, so it survives the recreation untouched.
-        if (isChangingConfigurations) {
-            runCatching { nfcAdapter?.disableReaderMode(this) }
-            return
-        }
-
-        // Both reads below need the value before deciding, so they stay in one
-        // coroutine instead of blocking the main thread. onPause runs on every
-        // app switch, and a DataStore first read parses a file - doing that
-        // synchronously was a recurring source of jank and, with anything else
-        // blocking the looper at the same time, ANR risk.
-        lifecycleScope.launch {
-            val backgroundEmu = dataStore.backgroundEmulation.first()
-            if (!backgroundEmu) {
-                stopEmulation()
-            }
-        }
-
-        runCatching { nfcAdapter?.disableReaderMode(this) }
-    }
-
-    /** 同 MainScreen.deactivateCard()：断路由 + 清激活状态 + 取消通知 */
-    private suspend fun stopEmulation() {
-        val activeId = dataStore.activeCardId.first() ?: return
-
-        // 1. 禁用 HCE-F 路由
-        runCatching {
-            nfcAdapter?.let { NfcFCardEmulation.getInstance(it) }?.disableService(this)
-        }
-
-        // 2. 清除激活状态（MainScreen 会响应并更新 UI）
-        dataStore.saveActiveCardId(null)
-
-        // 3. 取消通知栏
-        LiveUpdateManager.cancel(this)
+        UpdateTask.uiVisible = false
     }
 }
