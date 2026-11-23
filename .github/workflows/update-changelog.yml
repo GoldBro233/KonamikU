@@ -39,7 +39,7 @@ jobs:
           fi
 
           # version_code must be a positive integer — build.gradle.kts derives it
-          # from yyMM+major+minor, and clients compare it numerically.
+          # as yyMM*10000 + major*100 + minor, and clients compare it numerically.
           if ! [[ "$TAG" =~ ^[0-9]+$ ]]; then
             echo "::error::Tag '$TAG' is not numeric; clients cannot compare it as version_code. Aborting."
             exit 1
@@ -48,6 +48,102 @@ jobs:
           echo "version_code=$TAG" >> "$GITHUB_OUTPUT"
           echo "current_tag=$TAG"   >> "$GITHUB_OUTPUT"
           echo "Resolved tag: $TAG"
+
+      # The feed may only point at an APK that existing installs can take:
+      # same package and signer, versionCode equal to the tag, and above every
+      # earlier release. Anything else stops here, before update info exists.
+      - name: Verify release APK
+        id: apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.versions.outputs.current_tag }}
+        run: |
+          REPO="${GITHUB_REPOSITORY}"
+          PACKAGE="org.cf0x.konamiku"
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          SIGNER_RE='^Signer #[0-9]+ certificate SHA-256 digest:'
+          FAIL=0
+
+          if ! curl -fsSL --retry 2 --max-time 300 -o /tmp/release.apk \
+               "https://github.com/${REPO}/releases/download/${TAG}/app-release.apk"; then
+            echo "::error::Cannot download app-release.apk of release $TAG"
+            exit 1
+          fi
+
+          # 1. Package and versionCode come from the APK itself, not the tag.
+          BADGING=$("$BT/aapt2" dump badging /tmp/release.apk | head -n 1)
+          APK_PACKAGE=$(grep -oP "^package: name='\K[^']+" <<<"$BADGING" || true)
+          APK_CODE=$(grep -oP " versionCode='\K[0-9]+" <<<"$BADGING" || true)
+          echo "APK: package=$APK_PACKAGE versionCode=$APK_CODE"
+          if [ "$APK_PACKAGE" != "$PACKAGE" ]; then
+            echo "::error::APK package '$APK_PACKAGE' is not $PACKAGE"
+            FAIL=1
+          fi
+          if [ "$APK_CODE" != "$TAG" ]; then
+            echo "::error::APK versionCode '$APK_CODE' does not equal tag '$TAG'"
+            FAIL=1
+          fi
+
+          # 2. Above every other released version. Each release tag equals its
+          #    APK versionCode (enforced above), so the tags stand in for them;
+          #    re-running an old tag fails here instead of moving the feed back.
+          if ! RELEASE_TAGS=$(gh api --paginate "repos/${REPO}/releases" \
+                                --jq '.[] | select(.draft | not) | .tag_name'); then
+            echo "::error::Cannot list releases of ${REPO}"
+            exit 1
+          fi
+          PREV_MAX=$(grep -E '^[0-9]+$' <<<"$RELEASE_TAGS" | grep -vxF "$TAG" | sort -n | tail -n 1)
+          if [ -n "$PREV_MAX" ] && [ "$TAG" -le "$PREV_MAX" ]; then
+            echo "::error::Tag $TAG is not above the highest released version $PREV_MAX"
+            FAIL=1
+          fi
+
+          # 3. A valid signature, from the same signer as the APK the live feed
+          #    points at, and never a version below that feed.
+          NEW_SIGNERS=$("$BT/apksigner" verify --print-certs /tmp/release.apk | grep -E "$SIGNER_RE" | sort)
+          if [ -z "$NEW_SIGNERS" ]; then
+            echo "::error::APK signature does not verify"
+            FAIL=1
+          fi
+          # Exit code 2 means the branch does not exist yet; any other failure
+          # must not silently skip the comparison.
+          RC=0
+          git ls-remote --exit-code --heads origin info >/dev/null || RC=$?
+          if [ "$RC" -ne 0 ] && [ "$RC" -ne 2 ]; then
+            echo "::error::Cannot query the info branch (git ls-remote exit $RC)"
+            exit 1
+          fi
+          if [ "$RC" -eq 0 ]; then
+            git fetch --quiet origin info
+            FEED=$(git show FETCH_HEAD:update.json)
+            FEED_CODE=$(jq -r '.version_code' <<<"$FEED")
+            FEED_URL=$(jq -r '.download_url' <<<"$FEED")
+            if ! [[ "$FEED_CODE" =~ ^[0-9]+$ ]]; then
+              echo "::error::Live feed version_code '$FEED_CODE' is not numeric"
+              FAIL=1
+            elif [ "$TAG" -lt "$FEED_CODE" ]; then
+              echo "::error::Tag $TAG is below the live feed version $FEED_CODE"
+              FAIL=1
+            fi
+            if curl -fsSL --retry 2 --max-time 300 -o /tmp/feed.apk "$FEED_URL"; then
+              OLD_SIGNERS=$("$BT/apksigner" verify --print-certs /tmp/feed.apk | grep -E "$SIGNER_RE" | sort)
+              if [ -z "$OLD_SIGNERS" ] || [ "$OLD_SIGNERS" != "$NEW_SIGNERS" ]; then
+                echo "::error::APK signer differs from the live feed APK ($FEED_URL)"
+                FAIL=1
+              fi
+            else
+              echo "::error::Cannot download the live feed APK ($FEED_URL) to compare signers"
+              FAIL=1
+            fi
+          else
+            echo "::notice::No live feed on the info branch; skipping feed and signer comparison"
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::error::Release APK rejected — info branch NOT updated."
+            exit 1
+          fi
+          echo "version_code=$APK_CODE" >> "$GITHUB_OUTPUT"
 
       - name: Generate per-tag changelogs
         run: |
@@ -171,6 +267,12 @@ jobs:
               fi
             done
           done
+
+          # 5. The feed must describe exactly the APK verified above.
+          if [ "$CODE" != "${{ steps.apk.outputs.version_code }}" ]; then
+            echo "::error::update.json version_code $CODE differs from the APK versionCode"
+            FAIL=1
+          fi
 
           if [ "$FAIL" -ne 0 ]; then
             echo "::error::Artifact verification failed — info branch NOT updated."

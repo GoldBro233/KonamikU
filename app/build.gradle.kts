@@ -2,6 +2,7 @@
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Properties
+import java.util.TimeZone
 
 plugins {
     alias(libs.plugins.android.application)
@@ -12,6 +13,7 @@ plugins {
 // Version components live in local.properties (git-ignored) as:
 //   ver.major = 1
 //   ver.minor = 0
+//   ver.month = 2607   (optional release month, yyMM)
 // Reading local.properties keeps them out of the repository while still
 // letting every local build agree on the same numbers.
 val localProps = Properties().apply {
@@ -19,14 +21,27 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
-val vMajor = localProps.getProperty("ver.major")?.trim().orEmpty().ifBlank { "0" }
-val vMinor = localProps.getProperty("ver.minor")?.trim().orEmpty().ifBlank { "0" }
+fun versionPart(key: String): Int {
+    val raw = localProps.getProperty(key)?.trim().orEmpty().ifBlank { "0" }
+    val value = raw.toIntOrNull()
+    require(value != null && value in 0..99) { "$key must be an integer in 0..99, got '$raw'" }
+    return value
+}
 
-val dateTag = SimpleDateFormat("yyMM").format(Date())
-val dateDotTag = SimpleDateFormat("yy.MM").format(Date())
+val vMajor = versionPart("ver.major")
+val vMinor = versionPart("ver.minor")
 
-val finalCode = "${dateTag}${vMajor}${vMinor}"
-val finalName = "${dateDotTag}.${vMajor}.${vMinor}"
+// One month per release: an explicit ver.month, else the current UTC month,
+// so builds on machines in different time zones agree.
+val vMonth = localProps.getProperty("ver.month")?.trim().orEmpty().ifBlank {
+    SimpleDateFormat("yyMM").apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
+}
+require(Regex("""\d{2}(0[1-9]|1[0-2])""").matches(vMonth)) { "ver.month must be yyMM, got '$vMonth'" }
+
+// Fixed width, so 1.10 and 11.0 cannot collide: yyMM·10000 + major·100 + minor.
+// The release workflow refuses an APK whose versionCode differs from its tag.
+val finalCode = vMonth.toInt() * 10_000 + vMajor * 100 + vMinor
+val finalName = "${vMonth.substring(0, 2)}.${vMonth.substring(2)}.$vMajor.$vMinor"
 
 android {
     namespace  = "org.cf0x.konamiku"
@@ -36,7 +51,7 @@ android {
         applicationId = "org.cf0x.konamiku"
         minSdk        = 29
         targetSdk     = 37
-        versionCode = finalCode.toInt()
+        versionCode = finalCode
         versionName = finalName
 
         ndk {

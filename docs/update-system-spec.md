@@ -202,7 +202,17 @@ jq -n --arg tag "$TAG" --arg repo "${REPO}" '{
 
 ### 2.5 Step 4：产物校验（推送前的闸门）
 
-四项检查，任一失败 → `FAIL=1` → 不推送 `info` 分支：
+生成任何产物之前，`Verify release APK` 先下载该 Release 的 `app-release.apk`，用 `aapt2`/`apksigner` 读取实际 APK，任一失败即中止：
+
+| # | 检查 | 目的 |
+|---|---|---|
+| A | 包名为 `org.cf0x.konamiku`，`versionCode` 等于数字 tag | 拦住 tag 与 APK 不一致 |
+| B | tag 大于其他所有非草稿 Release 的数字 tag | 拦住重发旧 tag、历史更高版本 |
+| C | 签名有效；若 `info` 分支已有 feed，签名者与 feed 指向的 APK 相同，且 tag 不低于 feed 的 `version_code` | 拦住无法覆盖安装的 APK 和 feed 回退 |
+
+B 用 tag 代替历史 APK 的 `versionCode`：A 保证二者相等，旧式 6 位 tag 也与当时的 APK 一致。查询 Release 列表或 `info` 分支失败时直接中止，不跳过比较。
+
+产物生成后再做五项检查，任一失败 → `FAIL=1` → 不推送 `info` 分支：
 
 | # | 检查 | 目的 |
 |---|---|---|
@@ -210,6 +220,7 @@ jq -n --arg tag "$TAG" --arg repo "${REPO}" '{
 | 2 | `changelog-<tag>.json` 确实已生成 | 拦住生成环节漏掉 |
 | 3 | `curl -fsIL` 能 HEAD 到 `download_url` | **拦住 APK 改名 / asset 缺失** |
 | 4 | 遍历所有 changelog，`previous_/next_changelog` 指向的文件都存在于本次生成集 | 拦住静默断链 |
+| 5 | `update.json` 的 `version_code` 等于上面读到的 APK `versionCode` | feed 只描述已校验的 APK |
 
 第 3 项特别重要——它把「JSON 正确但 APK 不在」这个原本静默的问题变成了失败。
 
@@ -447,14 +458,13 @@ git log "$RANGE" --reverse -z --format='%H%x00%s%x00%b' > raw.txt
 
 **历史遗留**：若 tag 曾被发布过，`info` 分支上可能残留 `changelog-hello.json` 之类的文件。因为推送是 force + 全量替换，下次 Action 运行会自动清理。
 
-### 4.3 `version_code` 编码天花板
+### 4.3 `version_code` 编码
 
-`version_code = yyMM + major + minor`（例：`2607` + `1` + `0` = `260710`）。
+`version_code = yyMM × 10000 + major × 100 + minor`（例：`2607`、`1.10` → `26070110`）。Release tag 必须与之相同。
 
-- `major` 或 `minor` 超过一位数会位数不定长，`1.10` 与 `11.0` 会撞车。
-- 约束：**major / minor 都必须保持 0–9**。
-
-移植建议：若你的项目版本节奏更快，改用固定位数（如 `yyMM` + 2 位 major + 2 位 minor）。
+- `major`、`minor` 各占两位，必须在 `0–99`，超出时 Gradle 直接报错。`1.9`、`1.10`、`11.0` 分别编码为 `…0109`、`…0110`、`…1100`，不再撞车或倒序。
+- 发行月份 `yyMM` 取 `local.properties` 的 `ver.month`，未设置时取构建时的 UTC 月份；同一版本的所有构建必须使用同一月份。
+- 旧式直接拼接（`2607` + `4` + `3` = `260743`），一位分量时只有 6 位，新式至少 8 位。但旧式多位分量（如 `11.10` → `26071110`）可能与新式相等，所以编码本身不保证迁移后的首版更大，由 §2.5 的 B、C 两项对实际 APK 和历史最高版本把关。
 
 ### 4.4 仓库改名后必须重新生成产物
 
