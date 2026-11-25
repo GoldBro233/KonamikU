@@ -3,10 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <dlfcn.h>
 #include <android/log.h>
 #include <sys/system_properties.h>
 #include "dobby.h"
+#include "elf_lookup.h"
 #include "pmm_tlv.h"
 
 #define TAG     "KonamikU_pmm"
@@ -20,8 +20,9 @@ static const uint8_t TARGET_PMM[8] = {
     0x00, 0xF1, 0x00, 0x00, 0x00, 0x01, 0x43, 0x00
 };
 
-/* Mangled symbol resolved from libnfc-nci.so. Confirmed present on stock
- * Android 17 (RMX8899) at a fixed offset with size 1684. */
+/* Mangled name of the NCI stack's config writer, 1684 bytes on stock Android
+ * 17 (RMX8899) and in ST's libstnfc_nci_jni.so (Xiaomi 25019PNF3C), which
+ * exports it from .dynsym. */
 #define TARGET_SYMBOL "_Z23nfa_dm_check_set_confighPhb"
 
 /*
@@ -125,6 +126,11 @@ static int hooked_nfa_dm_check_set_config(uint8_t tlv_len, uint8_t *tlv, int fla
     return orig_nfa_dm_check_set_config(tlv_len, arg, flags);
 }
 
+/* Whether a loaded file name looks like an NCI stack library. */
+static int is_nci_stack(const char *file_name) {
+    return strstr(file_name, "nfc") != NULL && strstr(file_name, "nci") != NULL;
+}
+
 /**
  * Attempt the hook once. Callers hold g_hook_lock.
  *
@@ -137,61 +143,35 @@ static int try_install_hook_locked(void) {
     }
 
     /*
-     * Which library owns the symbol depends on the platform version.
+     * The library that owns the symbol differs by platform and vendor:
+     * libnfc-nci.so up to Android 13, libnfc_nci_jni.so from 14 (the stack
+     * folded into the JNI layer), and vendor builds such as ST's
+     * libstnfc_nci_jni.so, which Xiaomi ships inside
+     * /system/app/Nfc_st/Nfc_st.apk. It is loaded into the NFC app's own
+     * linker namespace, where dlsym from this library cannot see it, and may
+     * be mapped straight out of an APK.
      *
-     * Up to Android 13 the NCI stack lived in libnfc-nci.so. From 14 the
-     * stack was folded into the JNI layer: /system/lib64/libnfc-nci.so still
-     * exists on disk but is never mapped, and libnfc_nci_jni.so carries its
-     * own statically linked copy of nfa_dm_check_set_config. Resolving with a
-     * NULL module name only searches already-loaded objects, which is how the
-     * old code silently found nothing on newer builds.
+     * Dobby's resolver handled neither: after dlsym failed it mmap'd the file
+     * behind every mapped module and parsed it as an ELF, and for a library
+     * inside an APK that file is the APK itself - parsing the zip as an ELF
+     * header crashed com.android.nfc on every start. The dynamic symbol
+     * tables of the loaded objects are searched in memory instead.
      */
-    static const char *const kModules[] = {
-        "libnfc_nci_jni.so",   /* Android 14+ */
-        "libnfc-nci.so",       /* Android 13 and older */
-    };
-
-    void *target = NULL;
-    const char *module = NULL;
-    int any_loaded = 0;
-
-    for (size_t i = 0; i < sizeof(kModules) / sizeof(kModules[0]); ++i) {
-        /* dlopen with RTLD_NOLOAD only reports whether the library is already
-         * mapped; it never loads anything. That distinguishes "not mapped yet"
-         * (temporary) from "mapped but does not export the symbol" (permanent),
-         * which DobbySymbolResolver alone cannot tell apart - it returns NULL
-         * for both. */
-        void *handle = dlopen(kModules[i], RTLD_NOLOAD | RTLD_NOW);
-        if (handle != NULL) {
-            any_loaded = 1;
-            dlclose(handle);
-        }
-        void *candidate = DobbySymbolResolver(kModules[i], TARGET_SYMBOL);
-        if (candidate) {
-            target = candidate;
-            module = kModules[i];
-            break;
-        }
-    }
-    if (!target) {
-        /* Last resort: any already-loaded object that happens to export it. */
-        target = DobbySymbolResolver(NULL, TARGET_SYMBOL);
-        if (target) {
-            module = "(loaded objects)";
-        }
-    }
+    const char *object = NULL;
+    void *target = elf_find_loaded_symbol(TARGET_SYMBOL, &object);
 
     if (!target) {
-        /* Neither library is mapped: the NCI stack is loaded lazily, so this
-         * resolves on a later call. If one of them IS mapped and still lacks
-         * the symbol, the ROM diverges from stock and retrying will not help. */
-        g_hook_state = any_loaded ? PMM_STATE_NO_SYMBOL : PMM_STATE_WAITING_NCI;
+        /* The NCI stack is loaded lazily, so a miss before it is mapped
+         * resolves on a later call. Once it is mapped and still lacks the
+         * symbol, the ROM diverges from stock and retrying will not help. */
+        int nci_loaded = elf_loaded_object_matching(is_nci_stack);
+        g_hook_state = nci_loaded ? PMM_STATE_NO_SYMBOL : PMM_STATE_WAITING_NCI;
         LOGW("symbol %s not found (nci loaded=%d) -> %s",
-             TARGET_SYMBOL, any_loaded, state_name(g_hook_state));
+             TARGET_SYMBOL, nci_loaded, state_name(g_hook_state));
         return g_hook_state;
     }
 
-    LOGI("symbol found in %s @ %p", module, target);
+    LOGI("symbol found in %s @ %p", object != NULL ? object : "?", target);
 
     int ret = DobbyHook(
         target,
