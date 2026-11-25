@@ -146,24 +146,33 @@ class KonamikuModule : XposedModule() {
     }
 
     /**
-     * Hook state as reported by libpmm.so. Values mirror the PMM_STATE_*
-     * constants in bridge.c; changing either side requires changing both.
+     * Hook state. Codes 0-4 are returned by libpmm.so and mirror the
+     * PMM_STATE_* constants in bridge.c; changing either side requires
+     * changing both. Codes 5 and up are decided here, before or instead of
+     * asking the library.
      *
      * These are deliberately not collapsed into a boolean: WAITING_NCI clears
-     * itself on the next tag contact, NO_SYMBOL never will, and the UI has to
-     * say which one the user is looking at.
+     * itself on the next tag contact, NO_SYMBOL never will, a user who turned
+     * the tool off must not be told it failed, and the UI has to say which
+     * one the user is looking at.
      */
     enum class PmmState(val code: Int) {
-        /** libpmm.so has not been loaded yet. */
+        /** No attempt reported yet. */
         NOT_ATTEMPTED(0),
         /** Hook is live. */
         INSTALLED(1),
         /** Loader has no NCI stack mapped yet; retries resolve this. */
         WAITING_NCI(2),
-        /** Both known libraries were searched and neither exports the symbol. */
+        /** An NCI stack is mapped and nothing loaded exports the symbol. */
         NO_SYMBOL(3),
         /** Symbol resolved but DobbyHook refused. */
-        HOOK_FAILED(4);
+        HOOK_FAILED(4),
+        /** The PMm Tool setting was off when this NFC process read it. */
+        DISABLED(5),
+        /** libpmm.so could not be loaded or does not answer. */
+        LOAD_FAILED(6),
+        /** The setting could not be read yet; asked again on the next attempt. */
+        SETTING_UNAVAILABLE(7);
 
         companion object {
             fun fromCode(code: Int): PmmState =
@@ -197,19 +206,19 @@ class KonamikuModule : XposedModule() {
             when (readPmmEnabled()) {
                 null -> {
                     Log.i("KonamikU", "ensurePmm: setting unavailable; will ask again")
-                    return pmmState
+                    return PmmState.SETTING_UNAVAILABLE
                 }
                 false -> {
                     Log.i("KonamikU", "pmmtool disabled by user config")
                     disabledByUser = true
-                    return PmmState.NOT_ATTEMPTED
+                    return PmmState.DISABLED
                 }
                 true -> Unit
             }
             // Library loading and hook install are separate outcomes:
             // loading may succeed while the symbol is not yet resolvable.
             libraryLoaded = injectPmmtool(param)
-            if (!libraryLoaded) return PmmState.NOT_ATTEMPTED
+            if (!libraryLoaded) return PmmState.LOAD_FAILED
         }
         return tryInstallPmmHook().also { state ->
             if (state == PmmState.INSTALLED) Log.i("KonamikU", "pmmtool hook live")
@@ -307,7 +316,7 @@ class KonamikuModule : XposedModule() {
      */
     private fun tryInstallPmmHook(): PmmState = runCatching {
         PmmState.fromCode(nativePmmHooked())
-    }.getOrDefault(PmmState.NOT_ATTEMPTED)
+    }.getOrDefault(PmmState.LOAD_FAILED)
 
     /** Implemented in bridge.c; returns a PMM_STATE_* code. */
     private external fun nativePmmHooked(): Int

@@ -207,7 +207,13 @@
     <string name="status_pmm_hook_failed">후크 거부됨</string>
     <string name="status_pmm_hook_failed_hint">심볼은 찾았지만 패치가 거부되었습니다. ROM 업데이트로 함수가 바뀌었을 수 있습니다.</string>
     <string name="status_pmm_idle">로드되지 않음</string>
-    <string name="status_pmm_idle_hint">설정에서 비활성화되었습니다.</string>
+    <string name="status_pmm_idle_hint">NFC 서비스가 아직 상태를 보고하지 않았습니다. 계속되면 NFC 프로세스를 재시작하세요.</string>
+    <string name="status_pmm_disabled">꺼짐</string>
+    <string name="status_pmm_disabled_hint">NFC 서비스가 도구가 꺼진 상태로 시작되었습니다. NFC 프로세스를 재시작하면 적용됩니다.</string>
+    <string name="status_pmm_load_failed">로드 실패</string>
+    <string name="status_pmm_load_failed_hint">libpmm.so를 로드할 수 없습니다. 앱을 업데이트한 후에는 NFC 프로세스를 재시작하세요.</string>
+    <string name="status_pmm_setting_unavailable">설정 대기 중</string>
+    <string name="status_pmm_setting_unavailable_hint">NFC 서비스가 아직 설정을 읽지 못했습니다. 다음에 에뮬레이션을 시작할 때 다시 시도합니다.</string>
     <string name="update_title">KonamikU 업데이트</string>
     <string name="update_downloading">다운로드 중… %1$d%%</string>
     <string name="update_downloading_retry">미러를 사용할 수 없어 직접 다시 시도하는 중… %1$d%%</string>

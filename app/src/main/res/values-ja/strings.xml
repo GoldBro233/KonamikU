@@ -207,7 +207,13 @@
     <string name="status_pmm_hook_failed">フック拒否</string>
     <string name="status_pmm_hook_failed_hint">シンボルは見つかりましたが、パッチが拒否されました。ROM の更新で関数が変わった可能性があります。</string>
     <string name="status_pmm_idle">未ロード</string>
-    <string name="status_pmm_idle_hint">設定で無効になっています。</string>
+    <string name="status_pmm_idle_hint">NFC サービスからまだ状態が届いていません。続く場合は NFC プロセスを再起動してください。</string>
+    <string name="status_pmm_disabled">オフ</string>
+    <string name="status_pmm_disabled_hint">NFC サービスはツールがオフの状態で起動しました。NFC プロセスを再起動すると反映されます。</string>
+    <string name="status_pmm_load_failed">読み込み失敗</string>
+    <string name="status_pmm_load_failed_hint">libpmm.so を読み込めませんでした。アプリ更新後は NFC プロセスを再起動してください。</string>
+    <string name="status_pmm_setting_unavailable">設定待ち</string>
+    <string name="status_pmm_setting_unavailable_hint">NFC サービスがまだ設定を読み取れません。次にエミュレーションを開始したときに再試行します。</string>
     <string name="update_title">KonamikU のアップデート</string>
     <string name="update_downloading">ダウンロード中… %1$d%%</string>
     <string name="update_downloading_retry">ミラーが利用できないため直接再試行中… %1$d%%</string>

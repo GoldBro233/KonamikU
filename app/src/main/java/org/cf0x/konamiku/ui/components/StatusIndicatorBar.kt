@@ -360,8 +360,9 @@ private fun PanelXposed(xposed: StatusDetector.XposedStatus?, pmmEnabled: Boolea
  *
  * "Not installed" used to be a single flat case, which hid the only thing worth
  * knowing: WAITING_NCI resolves itself on the next tag tap, while NO_SYMBOL and
- * HOOK_FAILED never will. Each state gets its own label, colour and - where the
- * user can act - a one-line hint.
+ * HOOK_FAILED never will, and a library that failed to load was shown as
+ * "disabled in settings". Each state gets its own label, colour and - where
+ * the user can act - a one-line hint.
  */
 @Composable
 private fun PmmRow(state: KonamikuModule.PmmState) {
@@ -380,15 +381,28 @@ private fun PmmRow(state: KonamikuModule.PmmState) {
 
         KonamikuModule.PmmState.NOT_ATTEMPTED ->
             Triple(false, R.string.status_pmm_idle, R.string.status_pmm_idle_hint)
+
+        KonamikuModule.PmmState.DISABLED ->
+            Triple(false, R.string.status_pmm_disabled, R.string.status_pmm_disabled_hint)
+
+        KonamikuModule.PmmState.LOAD_FAILED ->
+            Triple(false, R.string.status_pmm_load_failed, R.string.status_pmm_load_failed_hint)
+
+        KonamikuModule.PmmState.SETTING_UNAVAILABLE ->
+            Triple(false, R.string.status_pmm_setting_unavailable, R.string.status_pmm_setting_unavailable_hint)
     }
 
-    // Waiting is expected, not broken: mark it with the tertiary colour rather
-    // than the error colour so a routine first launch does not look like a fault.
+    // Transient states are expected, not broken: mark them with the tertiary
+    // colour rather than the error colour so a routine first launch does not
+    // look like a fault.
+    val pending = state == KonamikuModule.PmmState.WAITING_NCI ||
+        state == KonamikuModule.PmmState.SETTING_UNAVAILABLE
     val tone = when {
-        active                                              -> MaterialTheme.colorScheme.primary
-        state == KonamikuModule.PmmState.WAITING_NCI        -> MaterialTheme.colorScheme.tertiary
-        state == KonamikuModule.PmmState.NOT_ATTEMPTED      -> MaterialTheme.colorScheme.outline
-        else                                                -> MaterialTheme.colorScheme.error
+        active  -> MaterialTheme.colorScheme.primary
+        pending -> MaterialTheme.colorScheme.tertiary
+        state == KonamikuModule.PmmState.NOT_ATTEMPTED ||
+            state == KonamikuModule.PmmState.DISABLED -> MaterialTheme.colorScheme.outline
+        else    -> MaterialTheme.colorScheme.error
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -398,7 +412,7 @@ private fun PmmRow(state: KonamikuModule.PmmState) {
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text  = if (active) "✓" else if (state == KonamikuModule.PmmState.WAITING_NCI) "…" else "✗",
+                text  = if (active) "✓" else if (pending) "…" else "✗",
                 color = tone,
                 style = MaterialTheme.typography.labelLarge
             )

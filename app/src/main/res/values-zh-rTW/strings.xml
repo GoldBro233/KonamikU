@@ -51,7 +51,13 @@
     <string name="status_pmm_waiting_hint">刷一次卡即可完成初始化。</string>
     <string name="status_pmm_no_symbol_hint">本機 NFC 協定堆疊未匯出目標符號，無法安裝 hook。</string>
     <string name="status_pmm_hook_failed_hint">符號已找到但修補被拒絕，ROM 更新可能改動了該函式。</string>
-    <string name="status_pmm_idle_hint">已在設定中關閉。</string>
+    <string name="status_pmm_idle_hint">NFC 服務尚未回報狀態；若持續如此，請重新啟動 NFC 程序。</string>
+    <string name="status_pmm_disabled">已關閉</string>
+    <string name="status_pmm_disabled_hint">NFC 服務啟動時此工具為關閉狀態，重新啟動 NFC 程序後生效。</string>
+    <string name="status_pmm_load_failed">載入失敗</string>
+    <string name="status_pmm_load_failed_hint">無法載入 libpmm.so。更新應用程式後請重新啟動 NFC 程序。</string>
+    <string name="status_pmm_setting_unavailable">等待讀取設定</string>
+    <string name="status_pmm_setting_unavailable_hint">NFC 服務暫時無法讀取設定，下次開始模擬時會重試。</string>
 <string name="status_rf_on">已開啟</string>
     <string name="status_rf_off">已關閉</string>
 

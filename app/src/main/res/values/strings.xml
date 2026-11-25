@@ -53,7 +53,13 @@
     <string name="status_pmm_waiting_hint">Tap a card once to finish setup.</string>
     <string name="status_pmm_no_symbol_hint">This device\'s NFC stack does not export the target symbol; the hook cannot be installed here.</string>
     <string name="status_pmm_hook_failed_hint">The symbol was found but the patch was refused. A ROM update may have changed the function.</string>
-    <string name="status_pmm_idle_hint">Disabled in settings.</string>
+    <string name="status_pmm_idle_hint">The NFC service has not reported yet. Restart the NFC process if this persists.</string>
+    <string name="status_pmm_disabled">Off</string>
+    <string name="status_pmm_disabled_hint">The NFC service started with the tool off. Restart the NFC process to apply.</string>
+    <string name="status_pmm_load_failed">Load failed</string>
+    <string name="status_pmm_load_failed_hint">libpmm.so could not be loaded. After an app update, restart the NFC process.</string>
+    <string name="status_pmm_setting_unavailable">Waiting for settings</string>
+    <string name="status_pmm_setting_unavailable_hint">The NFC service cannot read the setting yet; it retries the next time emulation starts.</string>
     <string name="status_rf_on">Enabled</string>
     <string name="status_rf_off">Disabled</string>
 

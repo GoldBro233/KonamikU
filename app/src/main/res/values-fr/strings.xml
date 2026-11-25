@@ -207,7 +207,13 @@
     <string name="status_pmm_hook_failed">Hook refusé</string>
     <string name="status_pmm_hook_failed_hint">Le symbole a été trouvé mais le correctif a été refusé. Une mise à jour de la ROM a peut-être modifié la fonction.</string>
     <string name="status_pmm_idle">Non chargé</string>
-    <string name="status_pmm_idle_hint">Désactivé dans les paramètres.</string>
+    <string name="status_pmm_idle_hint">Le service NFC n\'a pas encore signalé son état. Redémarrez le processus NFC si cela persiste.</string>
+    <string name="status_pmm_disabled">Désactivé</string>
+    <string name="status_pmm_disabled_hint">Le service NFC a démarré avec l\'outil désactivé. Redémarrez le processus NFC pour appliquer.</string>
+    <string name="status_pmm_load_failed">Échec du chargement</string>
+    <string name="status_pmm_load_failed_hint">Impossible de charger libpmm.so. Après une mise à jour de l\'app, redémarrez le processus NFC.</string>
+    <string name="status_pmm_setting_unavailable">En attente des paramètres</string>
+    <string name="status_pmm_setting_unavailable_hint">Le service NFC ne peut pas encore lire le paramètre ; il réessaiera au prochain démarrage de l\'émulation.</string>
     <string name="update_title">Mise à jour de KonamikU</string>
     <string name="update_downloading">Téléchargement… %1$d%%</string>
     <string name="update_downloading_retry">Miroir indisponible, nouvel essai en direct… %1$d%%</string>
