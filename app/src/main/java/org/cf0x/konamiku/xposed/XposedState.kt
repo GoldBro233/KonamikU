@@ -53,14 +53,18 @@ object XposedState {
      * Applies [report] unless a newer one from the NFC process was already
      * applied; see [NfcHookReceiver.Report.isNewerThan].
      *
+     * @param outdated the reporting module was loaded from an APK this app
+     *        has since replaced; the module is live but runs old code, so the
+     *        NFC process needs a restart rather than being ACTIVE.
      * @return whether the report was applied.
      */
     @Synchronized
-    fun applyReport(report: NfcHookReceiver.Report): Boolean {
+    fun applyReport(report: NfcHookReceiver.Report, outdated: Boolean): Boolean {
         if (lastReport?.let { report.isNewerThan(it) } == false) return false
         lastReport = report
         pmmState = report.state
-        activationState = XposedActivationState.ACTIVE
+        activationState = if (outdated) XposedActivationState.NEEDS_RESTART
+                          else XposedActivationState.ACTIVE
         return true
     }
 

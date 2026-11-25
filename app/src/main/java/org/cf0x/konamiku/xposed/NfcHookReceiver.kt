@@ -36,7 +36,8 @@ class NfcHookReceiver : BroadcastReceiver() {
             state = state,
             processStart = intent.getStringExtra(EXTRA_INSTANCE)
                 ?.substringAfter(':', "")?.toLongOrNull(),
-            seq = intent.getLongExtra(EXTRA_SEQ, 0L)
+            seq = intent.getLongExtra(EXTRA_SEQ, 0L),
+            moduleApk = intent.getStringExtra(EXTRA_MODULE_APK)
         )
         Log.i("KonamikU", "NFC hook ping — $report")
 
@@ -62,11 +63,14 @@ class NfcHookReceiver : BroadcastReceiver() {
      * @property processStart the reporting process's start time on the
      *           uptime clock, or null from module builds that predate it.
      * @property seq the report's order within that process.
+     * @property moduleApk the APK the reporting module was loaded from, or
+     *           null from module builds that predate it.
      */
     data class Report(
         val state: KonamikuModule.PmmState,
         val processStart: Long?,
-        val seq: Long
+        val seq: Long,
+        val moduleApk: String? = null
     ) {
         /**
          * Broadcasts are not ordered: a report from a process that has since
@@ -85,13 +89,31 @@ class NfcHookReceiver : BroadcastReceiver() {
         const val EXTRA_PMM_STATE = "pmmtool_state"
         const val EXTRA_INSTANCE = "nfc_instance"
         const val EXTRA_SEQ = "report_seq"
+        const val EXTRA_MODULE_APK = "module_apk"
         const val PREFS_NAME = "KonamikU_xposed"
 
-        /** Records a ping the framework has vouched for, unless a newer one was already applied. */
+        /**
+         * Records a ping the framework has vouched for, unless a newer one was
+         * already applied.
+         *
+         * A module loaded from an APK other than this app's current one is
+         * code from before the app was replaced: the NFC process has to
+         * restart to run this version, and until then its libpmm.so may be
+         * gone with the old APK.
+         */
         fun applyPing(context: Context, report: Report) {
-            if (!XposedState.applyReport(report)) {
+            val outdated = report.moduleApk != null &&
+                report.moduleApk != context.applicationInfo.sourceDir
+            if (!XposedState.applyReport(report, outdated)) {
                 Log.i("KonamikU", "Ignoring stale hook ping $report")
                 return
+            }
+            if (outdated) {
+                Log.w(
+                    "KonamikU",
+                    "NFC process runs the module from ${report.moduleApk}, " +
+                        "not ${context.applicationInfo.sourceDir}; NFC restart needed"
+                )
             }
 
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

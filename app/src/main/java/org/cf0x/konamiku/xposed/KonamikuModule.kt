@@ -48,6 +48,15 @@ class KonamikuModule : XposedModule() {
     }
 
     /**
+     * The APK this module's code was loaded from. Replacing the app gives it
+     * a new path while this process keeps running the old code (whose
+     * libpmm.so is gone with the old APK), so the app compares the two.
+     */
+    private val moduleApk: String? by lazy {
+        runCatching { getModuleApplicationInfo().sourceDir }.getOrNull()
+    }
+
+    /**
      * Reads the PMm Tool setting from the app's [org.cf0x.konamiku.system.PmmConfigProvider].
      *
      * @return the setting, or null when it cannot be read right now (app
@@ -233,6 +242,7 @@ class KonamikuModule : XposedModule() {
                 .putExtra("pmmtool_state", state.code)
                 .putExtra("nfc_instance", processInstance)
                 .putExtra("report_seq", seq)
+                .putExtra("module_apk", moduleApk)
         )
     }
 
